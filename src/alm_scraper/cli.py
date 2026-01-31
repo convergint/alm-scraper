@@ -21,6 +21,7 @@ from alm_scraper.display import (
     format_stats,
     format_stats_json,
 )
+from alm_scraper.query import execute_query, get_schema_help
 from alm_scraper.storage import sync_defects
 
 err = Console(stderr=True)
@@ -160,6 +161,62 @@ def stats(include_closed: bool, top_n: int, as_json: bool) -> None:
     else:
         out = Console()
         format_stats(stats_data, out, include_closed=include_closed, top_n=top_n)
+
+
+class QueryHelpCommand(click.Command):
+    """Custom command that shows schema in --help."""
+
+    def format_help(self, ctx: click.Context, formatter: click.HelpFormatter) -> None:
+        """Override to append schema documentation to help."""
+        super().format_help(ctx, formatter)
+        formatter.write("\n")
+        formatter.write(get_schema_help())
+
+
+@main.command(cls=QueryHelpCommand)
+@click.argument("sql", required=False)
+@click.option("--csv", "as_csv", is_flag=True, help="Output as CSV")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def query(sql: str | None, as_csv: bool, as_json: bool) -> None:
+    """Execute a SQL query against the defects database.
+
+    SQL can be passed as an argument or piped via stdin.
+    """
+    import sqlite3
+
+    # Read from stdin if no argument provided
+    if sql is None:
+        if sys.stdin.isatty():
+            err.print("[red]Error: No SQL provided.[/red]")
+            err.print()
+            err.print('Usage: alm query "SELECT ..."')
+            err.print('   or: echo "SELECT ..." | alm query')
+            sys.exit(1)
+        sql = sys.stdin.read().strip()
+        if not sql:
+            err.print("[red]Error: No SQL provided.[/red]")
+            sys.exit(1)
+
+    try:
+        result = execute_query(sql)
+    except FileNotFoundError:
+        err.print("[red]Error: No defects synced yet.[/red]")
+        err.print()
+        err.print("Run 'alm sync' or 'alm sync-file <file>' first.")
+        sys.exit(1)
+    except ValueError as e:
+        err.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+    except sqlite3.Error as e:
+        err.print(f"[red]SQL Error: {e}[/red]")
+        sys.exit(1)
+
+    if as_json:
+        print(result.to_json())
+    elif as_csv:
+        print(result.to_csv())
+    else:
+        print(result.to_table())
 
 
 @main.command()
