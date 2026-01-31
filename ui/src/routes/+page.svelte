@@ -2,7 +2,10 @@
 	import { fetchDefects, type DefectsParams } from '$lib/api';
 	import type { Defect, DefectsResponse } from '$lib/types';
 	import { goto } from '$app/navigation';
-	import { page } from '$app/stores';
+	import { Button } from '$lib/components/ui/button';
+	import { Input } from '$lib/components/ui/input';
+	import * as Table from '$lib/components/ui/table';
+	import * as Select from '$lib/components/ui/select';
 
 	let data: DefectsResponse | null = $state(null);
 	let loading = $state(true);
@@ -55,7 +58,7 @@
 
 	function formatDate(dateStr: string | null): string {
 		if (!dateStr) return '-';
-		return new Date(dateStr).toLocaleDateString();
+		return new Date(dateStr).toISOString().slice(0, 10);
 	}
 
 	function stripDomain(owner: string | null): string {
@@ -63,12 +66,13 @@
 		return owner.includes('_') ? owner.split('_')[0] : owner;
 	}
 
-	function getPriorityColor(priority: string | null): string {
-		if (!priority) return 'text-gray-400';
-		if (priority.includes('1')) return 'text-red-400';
-		if (priority.includes('2')) return 'text-orange-400';
-		if (priority.includes('3')) return 'text-yellow-400';
-		return 'text-gray-400';
+	function getPriorityIndicator(priority: string | null): { color: string; label: string } {
+		if (!priority) return { color: 'bg-muted', label: '-' };
+		if (priority.includes('1')) return { color: 'bg-red-500', label: 'P1' };
+		if (priority.includes('2')) return { color: 'bg-orange-500', label: 'P2' };
+		if (priority.includes('3')) return { color: 'bg-yellow-500', label: 'P3' };
+		if (priority.includes('4')) return { color: 'bg-green-500', label: 'P4' };
+		return { color: 'bg-muted', label: '-' };
 	}
 
 	// Load on mount
@@ -85,111 +89,107 @@
 	<h1 class="text-3xl font-bold mb-8">ALM Defects</h1>
 
 	<!-- Filters -->
-	<form onsubmit={handleSearch} class="mb-6 flex flex-wrap gap-4">
-		<input
-			type="text"
-			bind:value={search}
-			placeholder="Search..."
-			class="bg-gray-800 border border-gray-700 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
-		/>
+	<form onsubmit={handleSearch} class="mb-6 flex flex-wrap gap-4 items-end">
+		<div class="flex-1 min-w-48">
+			<Input
+				type="text"
+				bind:value={search}
+				placeholder="Search defects..."
+			/>
+		</div>
 
-		<select
-			bind:value={status}
-			onchange={handleFilterChange}
-			class="bg-gray-800 border border-gray-700 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
-		>
-			<option value="">All Status</option>
-			<option value="open">Open</option>
-			<option value="closed">Closed</option>
-			<option value="rejected">Rejected</option>
-		</select>
+		<Select.Root type="single" bind:value={status} onValueChange={handleFilterChange}>
+			<Select.Trigger class="w-40">
+				{status ? (status === 'open' ? 'Open' : status === 'closed' ? 'Closed' : 'Rejected') : 'All Status'}
+			</Select.Trigger>
+			<Select.Content>
+				<Select.Item value="">All Status</Select.Item>
+				<Select.Item value="open">Open</Select.Item>
+				<Select.Item value="closed">Closed</Select.Item>
+				<Select.Item value="rejected">Rejected</Select.Item>
+			</Select.Content>
+		</Select.Root>
 
-		<select
-			bind:value={priority}
-			onchange={handleFilterChange}
-			class="bg-gray-800 border border-gray-700 rounded px-4 py-2 focus:outline-none focus:border-blue-500"
-		>
-			<option value="">All Priority</option>
-			<option value="P1">P1 - Critical</option>
-			<option value="P2">P2 - High</option>
-			<option value="P3">P3 - Medium</option>
-			<option value="P4">P4 - Low</option>
-		</select>
+		<Select.Root type="single" bind:value={priority} onValueChange={handleFilterChange}>
+			<Select.Trigger class="w-40">
+				{priority ? priority.split('-')[0] : 'All Priority'}
+			</Select.Trigger>
+			<Select.Content>
+				<Select.Item value="">All Priority</Select.Item>
+				<Select.Item value="P1-Critical">P1 - Critical</Select.Item>
+				<Select.Item value="P2-High">P2 - High</Select.Item>
+				<Select.Item value="P3-Medium">P3 - Medium</Select.Item>
+				<Select.Item value="P4-Low">P4 - Low</Select.Item>
+			</Select.Content>
+		</Select.Root>
 
-		<button
-			type="submit"
-			class="bg-blue-600 hover:bg-blue-700 px-4 py-2 rounded font-medium"
-		>
-			Search
-		</button>
+		<Button type="submit">Search</Button>
 	</form>
 
 	<!-- Loading / Error states -->
 	{#if loading}
-		<div class="text-center py-12 text-gray-400">Loading...</div>
+		<div class="text-center py-12 text-muted-foreground">Loading...</div>
 	{:else if error}
-		<div class="text-center py-12 text-red-400">{error}</div>
+		<div class="text-center py-12 text-destructive">{error}</div>
 	{:else if data}
 		<!-- Results count -->
-		<div class="mb-4 text-gray-400">
+		<div class="mb-4 text-muted-foreground">
 			Showing {data.defects.length} of {data.total} defects (page {data.page} of {data.pages})
 		</div>
 
 		<!-- Defects table -->
-		<div class="overflow-x-auto">
-			<table class="w-full text-left">
-				<thead class="border-b border-gray-700">
-					<tr>
-						<th class="py-3 px-4 font-medium">ID</th>
-						<th class="py-3 px-4 font-medium">Name</th>
-						<th class="py-3 px-4 font-medium">Status</th>
-						<th class="py-3 px-4 font-medium">Priority</th>
-						<th class="py-3 px-4 font-medium">Owner</th>
-						<th class="py-3 px-4 font-medium">Created</th>
-					</tr>
-				</thead>
-				<tbody>
-					{#each data.defects as defect}
-						<tr
-							class="border-b border-gray-800 hover:bg-gray-800 cursor-pointer"
-							onclick={() => goto(`/defects/${defect.id}`)}
-						>
-							<td class="py-3 px-4 text-blue-400">#{defect.id}</td>
-							<td class="py-3 px-4">{defect.name}</td>
-							<td class="py-3 px-4">
-								<span class="px-2 py-1 rounded text-sm {defect.status === 'Open' ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-300'}">
-									{defect.status || '-'}
-								</span>
-							</td>
-							<td class="py-3 px-4 {getPriorityColor(defect.priority)}">{defect.priority || '-'}</td>
-							<td class="py-3 px-4">{stripDomain(defect.owner)}</td>
-							<td class="py-3 px-4 text-gray-400">{formatDate(defect.created)}</td>
-						</tr>
-					{/each}
-				</tbody>
-			</table>
-		</div>
+		<Table.Root>
+			<Table.Header>
+				<Table.Row>
+					<Table.Head class="w-16">ID</Table.Head>
+					<Table.Head>Name</Table.Head>
+					<Table.Head class="w-12 text-center">Pri</Table.Head>
+					<Table.Head class="w-24">Owner</Table.Head>
+					<Table.Head class="w-24">Created</Table.Head>
+				</Table.Row>
+			</Table.Header>
+			<Table.Body>
+				{#each data.defects as defect}
+					<Table.Row class="cursor-pointer" onclick={() => goto(`/defects/${defect.id}`)}>
+						<Table.Cell>
+							<a href="/defects/{defect.id}" class="text-primary hover:underline text-sm" onclick={(e) => e.stopPropagation()}>
+								#{defect.id}
+							</a>
+						</Table.Cell>
+						<Table.Cell class="max-w-md truncate" title={defect.name}>{defect.name}</Table.Cell>
+						<Table.Cell class="text-center">
+							{@const p = getPriorityIndicator(defect.priority)}
+							<span class="inline-flex items-center justify-center" title={defect.priority || 'No priority'}>
+								<span class="w-2.5 h-2.5 rounded-full {p.color}"></span>
+							</span>
+						</Table.Cell>
+						<Table.Cell class="truncate" title={defect.owner || ''}>{stripDomain(defect.owner)}</Table.Cell>
+						<Table.Cell class="text-muted-foreground">{formatDate(defect.created)}</Table.Cell>
+					</Table.Row>
+				{/each}
+			</Table.Body>
+		</Table.Root>
 
 		<!-- Pagination -->
 		{#if data.pages > 1}
-			<div class="mt-6 flex justify-center gap-2">
-				<button
+			<div class="mt-6 flex justify-center gap-2 items-center">
+				<Button
+					variant="outline"
 					onclick={() => goToPage(currentPage - 1)}
 					disabled={currentPage === 1}
-					class="px-4 py-2 bg-gray-800 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-700"
 				>
 					Previous
-				</button>
-				<span class="px-4 py-2">
+				</Button>
+				<span class="px-4 text-muted-foreground">
 					Page {currentPage} of {data.pages}
 				</span>
-				<button
+				<Button
+					variant="outline"
 					onclick={() => goToPage(currentPage + 1)}
 					disabled={currentPage === data.pages}
-					class="px-4 py-2 bg-gray-800 rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-700"
 				>
 					Next
-				</button>
+				</Button>
 			</div>
 		{/if}
 	{/if}

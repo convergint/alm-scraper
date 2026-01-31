@@ -474,7 +474,8 @@ def config_path() -> None:
 @main.command()
 @click.option("--port", default=8753, help="Port to run on")
 @click.option("--no-open", is_flag=True, help="Don't open browser automatically")
-def ui(port: int, no_open: bool) -> None:
+@click.option("--reload", is_flag=True, help="Auto-reload when UI files change")
+def ui(port: int, no_open: bool, reload: bool) -> None:
     """Launch local web UI for browsing defects."""
     require_db()
 
@@ -496,14 +497,29 @@ def ui(port: int, no_open: bool) -> None:
         threading.Thread(target=open_browser, daemon=True).start()
 
     err.print(f"Starting ALM UI at {url}")
+    if reload:
+        err.print("[dim]Watching for changes (rebuild UI with 'make build-ui')[/dim]")
     err.print("Press Ctrl+C to stop")
     err.print()
+
+    # Get paths for reload watching
+    reload_dirs: list[str] = []
+    if reload:
+        from alm_scraper.ui import api
+
+        static_dir = Path(api.__file__).parent / "static"
+        if static_dir.exists():
+            reload_dirs.append(str(static_dir))
+        # Also watch the api module itself
+        reload_dirs.append(str(Path(api.__file__).parent))
 
     uvicorn.run(
         "alm_scraper.ui.api:app",
         host="127.0.0.1",
         port=port,
-        log_level="warning",
+        log_level="warning" if not reload else "info",
+        reload=reload,
+        reload_dirs=reload_dirs if reload_dirs else None,
     )
 
 

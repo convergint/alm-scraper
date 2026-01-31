@@ -3,6 +3,10 @@
 	import type { Defect } from '$lib/types';
 	import { page } from '$app/stores';
 	import { goto } from '$app/navigation';
+	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
+	import * as Card from '$lib/components/ui/card';
+	import { Separator } from '$lib/components/ui/separator';
 
 	let defect: Defect | null = $state(null);
 	let loading = $state(true);
@@ -10,7 +14,8 @@
 
 	function formatDate(dateStr: string | null): string {
 		if (!dateStr) return '-';
-		return new Date(dateStr).toLocaleString();
+		const d = new Date(dateStr);
+		return d.toISOString().replace('T', ' ').slice(0, 19);
 	}
 
 	function stripDomain(owner: string | null): string {
@@ -18,12 +23,11 @@
 		return owner.includes('_') ? owner.split('_')[0] : owner;
 	}
 
-	function getPriorityColor(priority: string | null): string {
-		if (!priority) return 'text-gray-400';
-		if (priority.includes('1')) return 'text-red-400';
-		if (priority.includes('2')) return 'text-orange-400';
-		if (priority.includes('3')) return 'text-yellow-400';
-		return 'text-gray-400';
+	function getPriorityVariant(priority: string | null): 'destructive' | 'secondary' | 'outline' {
+		if (!priority) return 'outline';
+		if (priority.includes('1')) return 'destructive';
+		if (priority.includes('2')) return 'secondary';
+		return 'outline';
 	}
 
 	function handleKeydown(e: KeyboardEvent) {
@@ -60,93 +64,102 @@
 
 <div class="container mx-auto px-4 py-8 max-w-4xl">
 	<!-- Back button -->
-	<a href="/" class="text-blue-400 hover:text-blue-300 mb-6 inline-block">
+	<Button variant="ghost" href="/" class="mb-6">
 		&larr; Back to list
-	</a>
+	</Button>
 
 	{#if loading}
-		<div class="text-center py-12 text-gray-400">Loading...</div>
+		<div class="text-center py-12 text-muted-foreground">Loading...</div>
 	{:else if error}
-		<div class="text-center py-12 text-red-400">{error}</div>
+		<div class="text-center py-12 text-destructive">{error}</div>
 	{:else if defect}
 		<!-- Header -->
 		<div class="mb-8">
-			<div class="text-gray-400 mb-2">#{defect.id}</div>
+			<div class="text-muted-foreground mb-2">#{defect.id}</div>
 			<h1 class="text-2xl font-bold mb-4">{defect.name}</h1>
 
-			<div class="flex flex-wrap gap-4">
-				<span class="px-3 py-1 rounded {defect.status === 'Open' ? 'bg-green-900 text-green-300' : 'bg-gray-700 text-gray-300'}">
+			<div class="flex flex-wrap gap-2">
+				<Badge variant={defect.status === 'Open' ? 'default' : 'secondary'}>
 					{defect.status || 'Unknown'}
-				</span>
-				<span class="px-3 py-1 rounded bg-gray-800 {getPriorityColor(defect.priority)}">
+				</Badge>
+				<Badge variant={getPriorityVariant(defect.priority)}>
 					{defect.priority || 'No priority'}
-				</span>
+				</Badge>
 			</div>
 		</div>
 
 		<!-- Metadata grid -->
-		<div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-8 p-4 bg-gray-800 rounded-lg">
-			<div>
-				<div class="text-gray-400 text-sm">Owner</div>
-				<div>{stripDomain(defect.owner)}</div>
-			</div>
-			<div>
-				<div class="text-gray-400 text-sm">Detected By</div>
-				<div>{stripDomain(defect.detected_by)}</div>
-			</div>
-			<div>
-				<div class="text-gray-400 text-sm">Severity</div>
-				<div>{defect.severity || '-'}</div>
-			</div>
-			<div>
-				<div class="text-gray-400 text-sm">Type</div>
-				<div>{defect.defect_type || '-'}</div>
-			</div>
-			<div>
-				<div class="text-gray-400 text-sm">Module</div>
-				<div>{defect.module || '-'}</div>
-			</div>
-			<div>
-				<div class="text-gray-400 text-sm">Workstream</div>
-				<div>{defect.workstream || '-'}</div>
-			</div>
-			<div>
-				<div class="text-gray-400 text-sm">Created</div>
-				<div>{formatDate(defect.created)}</div>
-			</div>
-			<div>
-				<div class="text-gray-400 text-sm">Modified</div>
-				<div>{formatDate(defect.modified)}</div>
-			</div>
-			<div>
-				<div class="text-gray-400 text-sm">Closed</div>
-				<div>{formatDate(defect.closed)}</div>
-			</div>
-		</div>
+		<Card.Root class="mb-8">
+			<Card.Content class="pt-6">
+				<div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+					<div>
+						<div class="text-muted-foreground text-sm">Owner</div>
+						<div>{stripDomain(defect.owner)}</div>
+					</div>
+					<div>
+						<div class="text-muted-foreground text-sm">Detected By</div>
+						<div>{stripDomain(defect.detected_by)}</div>
+					</div>
+					<div>
+						<div class="text-muted-foreground text-sm">Severity</div>
+						<div>{defect.severity || '-'}</div>
+					</div>
+					<div>
+						<div class="text-muted-foreground text-sm">Type</div>
+						<div>{defect.defect_type || '-'}</div>
+					</div>
+					<div>
+						<div class="text-muted-foreground text-sm">Module</div>
+						<div>{defect.module || '-'}</div>
+					</div>
+					<div>
+						<div class="text-muted-foreground text-sm">Workstream</div>
+						<div>{defect.workstream || '-'}</div>
+					</div>
+					<div>
+						<div class="text-muted-foreground text-sm">Created</div>
+						<div>{formatDate(defect.created)}</div>
+					</div>
+					<div>
+						<div class="text-muted-foreground text-sm">Modified</div>
+						<div>{formatDate(defect.modified)}</div>
+					</div>
+					<div>
+						<div class="text-muted-foreground text-sm">Closed</div>
+						<div>{formatDate(defect.closed)}</div>
+					</div>
+				</div>
+			</Card.Content>
+		</Card.Root>
 
 		<!-- Description -->
 		{#if defect.description}
-			<div class="mb-8">
-				<h2 class="text-lg font-semibold mb-3 text-gray-300">Description</h2>
-				<div class="p-4 bg-gray-800 rounded-lg html-content">
+			<Card.Root class="mb-8">
+				<Card.Header>
+					<Card.Title>Description</Card.Title>
+				</Card.Header>
+				<Card.Content class="html-content">
 					{@html defect.description}
-				</div>
-			</div>
+				</Card.Content>
+			</Card.Root>
 		{/if}
 
 		<!-- Dev Comments -->
 		{#if defect.dev_comments}
-			<div class="mb-8">
-				<h2 class="text-lg font-semibold mb-3 text-gray-300">Dev Comments</h2>
-				<div class="p-4 bg-gray-800 rounded-lg html-content">
+			<Card.Root class="mb-8">
+				<Card.Header>
+					<Card.Title>Dev Comments</Card.Title>
+				</Card.Header>
+				<Card.Content class="html-content">
 					{@html defect.dev_comments}
-				</div>
-			</div>
+				</Card.Content>
+			</Card.Root>
 		{/if}
 
 		<!-- Additional details -->
-		<div class="text-sm text-gray-500">
-			<p>Press <kbd class="px-2 py-1 bg-gray-700 rounded">Esc</kbd> to return to list</p>
+		<Separator class="my-6" />
+		<div class="text-sm text-muted-foreground">
+			<p>Press <kbd class="px-2 py-1 bg-muted rounded">Esc</kbd> to return to list</p>
 		</div>
 	{/if}
 </div>
