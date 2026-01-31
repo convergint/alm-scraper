@@ -173,3 +173,191 @@ def count_defects() -> int:
         return cur.fetchone()[0]
     finally:
         conn.close()
+
+
+class OldestDefect:
+    """Summary of the oldest open defect."""
+
+    def __init__(self, id: int, name: str, created: str) -> None:
+        self.id = id
+        self.name = name
+        self.created = created
+
+
+class CloseTimeStats:
+    """Statistics about defect close times."""
+
+    def __init__(self, p50: float, p75: float, avg: float) -> None:
+        self.p50 = p50  # median, in days
+        self.p75 = p75  # 75th percentile, in days
+        self.avg = avg  # average, in days
+
+
+class Stats:
+    """Aggregate statistics about defects."""
+
+    def __init__(
+        self,
+        total: int,
+        open_count: int,
+        closed_count: int,
+        by_priority: list[tuple[str, int]],
+        by_module: list[tuple[str, int]],
+        by_owner: list[tuple[str, int]],
+        by_type: list[tuple[str, int]],
+        by_workstream: list[tuple[str, int]],
+        oldest_open: OldestDefect | None = None,
+        close_time: CloseTimeStats | None = None,
+    ) -> None:
+        self.total = total
+        self.open_count = open_count
+        self.closed_count = closed_count
+        self.by_priority = by_priority
+        self.by_module = by_module
+        self.by_owner = by_owner
+        self.by_type = by_type
+        self.by_workstream = by_workstream
+        self.oldest_open = oldest_open
+        self.close_time = close_time
+
+
+def get_stats(include_closed: bool = False, top_n: int = 5) -> Stats | None:
+    """Get aggregate statistics about defects.
+
+    Args:
+        include_closed: Include closed defects in breakdowns (default: open only).
+        top_n: Number of items to include in each breakdown.
+
+    Returns:
+        Stats object, or None if no database exists.
+    """
+    db_path = get_db_path()
+
+    if not db_path.exists():
+        return None
+
+    conn = sqlite3.connect(db_path)
+    try:
+        cur = conn.cursor()
+
+        # Total counts (always show both)
+        cur.execute("SELECT COUNT(*) FROM defects")
+        total = cur.fetchone()[0]
+
+        cur.execute("SELECT COUNT(*) FROM defects WHERE LOWER(status) = 'open'")
+        open_count = cur.fetchone()[0]
+
+        closed_count = total - open_count
+
+        # Status filter for breakdowns
+        status_filter = "" if include_closed else "WHERE LOWER(status) = 'open'"
+
+        # By priority (show all, sorted by priority)
+        cur.execute(f"""
+            SELECT priority, COUNT(*) as count
+            FROM defects {status_filter}
+            GROUP BY priority
+            ORDER BY priority ASC
+        """)
+        by_priority = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+
+        # By module (top N)
+        cur.execute(
+            f"""
+            SELECT module, COUNT(*) as count
+            FROM defects {status_filter}
+            GROUP BY module
+            ORDER BY count DESC
+            LIMIT ?
+        """,
+            (top_n,),
+        )
+        by_module = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+
+        # By owner (top N)
+        cur.execute(
+            f"""
+            SELECT owner, COUNT(*) as count
+            FROM defects {status_filter}
+            GROUP BY owner
+            ORDER BY count DESC
+            LIMIT ?
+        """,
+            (top_n,),
+        )
+        by_owner = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+
+        # By type (top N)
+        cur.execute(
+            f"""
+            SELECT defect_type, COUNT(*) as count
+            FROM defects {status_filter}
+            GROUP BY defect_type
+            ORDER BY count DESC
+            LIMIT ?
+        """,
+            (top_n,),
+        )
+        by_type = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+
+        # By workstream (top N)
+        cur.execute(
+            f"""
+            SELECT workstream, COUNT(*) as count
+            FROM defects {status_filter}
+            GROUP BY workstream
+            ORDER BY count DESC
+            LIMIT ?
+        """,
+            (top_n,),
+        )
+        by_workstream = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+
+        # Oldest open defect
+        oldest_open = None
+        cur.execute("""
+            SELECT id, name, created
+            FROM defects
+            WHERE LOWER(status) = 'open' AND created IS NOT NULL
+            ORDER BY created ASC
+            LIMIT 1
+        """)
+        row = cur.fetchone()
+        if row:
+            oldest_open = OldestDefect(id=row[0], name=row[1], created=row[2])
+
+        # Close time stats (for defects with both created and closed dates)
+        close_time = None
+        cur.execute("""
+            SELECT julianday(closed) - julianday(created) as days
+            FROM defects
+            WHERE closed IS NOT NULL AND created IS NOT NULL
+            ORDER BY days ASC
+        """)
+        close_days = [row[0] for row in cur.fetchall() if row[0] is not None and row[0] >= 0]
+
+        if close_days:
+            n = len(close_days)
+            p50_idx = n // 2
+            p75_idx = int(n * 0.75)
+
+            p50 = close_days[p50_idx]
+            p75 = close_days[min(p75_idx, n - 1)]
+            avg = sum(close_days) / n
+
+            close_time = CloseTimeStats(p50=p50, p75=p75, avg=avg)
+
+        return Stats(
+            total=total,
+            open_count=open_count,
+            closed_count=closed_count,
+            by_priority=by_priority,
+            by_module=by_module,
+            by_owner=by_owner,
+            by_type=by_type,
+            by_workstream=by_workstream,
+            oldest_open=oldest_open,
+            close_time=close_time,
+        )
+    finally:
+        conn.close()

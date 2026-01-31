@@ -9,7 +9,7 @@ from rich.console import Console
 from alm_scraper.api import ALMClient
 from alm_scraper.config import Config, get_config_path, load_config, save_config
 from alm_scraper.curl_parser import parse_curl
-from alm_scraper.db import count_defects, get_db_path, get_defect_by_id, list_defects
+from alm_scraper.db import count_defects, get_db_path, get_defect_by_id, get_stats, list_defects
 from alm_scraper.defect import parse_alm_response
 from alm_scraper.display import (
     format_defect,
@@ -18,6 +18,8 @@ from alm_scraper.display import (
     format_defect_table,
     format_defects_json,
     format_defects_markdown,
+    format_stats,
+    format_stats_json,
 )
 from alm_scraper.storage import sync_defects
 
@@ -130,6 +132,34 @@ def list_cmd(
         print(format_defects_markdown(defects))
     elif output_format == "json":
         print(format_defects_json(defects))
+
+
+@main.command()
+@click.option("--all", "include_closed", is_flag=True, help="Include closed defects in breakdowns")
+@click.option("--top", "top_n", default=5, help="Number of items in each breakdown [default: 5]")
+@click.option("--json", "as_json", is_flag=True, help="Output as JSON")
+def stats(include_closed: bool, top_n: int, as_json: bool) -> None:
+    """Show aggregate statistics about defects."""
+    db_path = get_db_path()
+
+    if not db_path.exists():
+        err.print("[red]Error: No defects synced yet.[/red]")
+        err.print()
+        err.print("Run 'alm sync' or 'alm sync-file <file>' first.")
+        sys.exit(1)
+
+    stats_data = get_stats(include_closed=include_closed, top_n=top_n)
+
+    if stats_data is None:
+        err.print("[red]Error: Could not load stats.[/red]")
+        sys.exit(1)
+        return  # help type checker
+
+    if as_json:
+        print(format_stats_json(stats_data))
+    else:
+        out = Console()
+        format_stats(stats_data, out, include_closed=include_closed, top_n=top_n)
 
 
 @main.command()

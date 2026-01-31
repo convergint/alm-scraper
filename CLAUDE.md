@@ -10,6 +10,7 @@
 
 - Always ask before committing. Don't commit automatically after completing a task.
 - When completing an RFC implementation, update its status to "Implemented" in the RFC file.
+- Never delete files without asking. Do not assume you are the only one working in this directory.
 
 ## Tools
 

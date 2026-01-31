@@ -5,6 +5,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
+from alm_scraper.db import Stats
 from alm_scraper.defect import Defect, strip_html_preserve_structure
 
 
@@ -265,6 +266,21 @@ def format_defects_json(defects: list[Defect]) -> str:
     return json.dumps([d.model_dump() for d in defects], indent=2)
 
 
+def _format_days(days: float) -> str:
+    """Format a duration in days as a human-readable string."""
+    if days < 1:
+        hours = int(days * 24)
+        return f"{hours}h"
+    elif days < 7:
+        return f"{days:.0f}d"
+    elif days < 30:
+        weeks = days / 7
+        return f"{weeks:.1f}w"
+    else:
+        months = days / 30
+        return f"{months:.1f}mo"
+
+
 def format_defects_markdown(defects: list[Defect]) -> str:
     """Format a list of defects as a markdown table.
 
@@ -290,3 +306,124 @@ def format_defects_markdown(defects: list[Defect]) -> str:
         lines.append(f"| #{d.id} | {d.status or '-'} | {d.priority or '-'} | {name} | {owner} |")
 
     return "\n".join(lines)
+
+
+def format_stats(
+    stats: Stats, console: Console, include_closed: bool = False, top_n: int = 5
+) -> None:
+    """Display aggregate statistics.
+
+    Args:
+        stats: Stats object with aggregate data.
+        console: Rich console to write to.
+        include_closed: Whether closed defects are included in breakdowns.
+    """
+    # Header
+    console.print()
+    console.print(
+        f"Defects: [green]{stats.open_count} open[/green] / "
+        f"[dim]{stats.closed_count} closed[/dim] ({stats.total} total)"
+    )
+
+    # Oldest open defect
+    if stats.oldest_open:
+        name = stats.oldest_open.name or ""
+        if len(name) > 45:
+            name = name[:42] + "..."
+        console.print(
+            f"Oldest open: [cyan]#{stats.oldest_open.id}[/cyan] "
+            f"({stats.oldest_open.created}) - {name}"
+        )
+
+    # Close time stats
+    if stats.close_time:
+        console.print(
+            f"Close time:  p50: [bold]{_format_days(stats.close_time.p50)}[/bold] | "
+            f"p75: {_format_days(stats.close_time.p75)} | "
+            f"avg: {_format_days(stats.close_time.avg)}"
+        )
+
+    # Determine the base count for percentages
+    base_count = stats.total if include_closed else stats.open_count
+    scope = "all" if include_closed else "open"
+
+    def print_breakdown(
+        title: str,
+        items: list[tuple[str, int]],
+        top_n: int | None = None,
+        strip_domain: bool = False,
+    ) -> None:
+        if not items:
+            return
+
+        # Only show "top N" if we actually limited results
+        top_label = f", top {len(items)}" if top_n and len(items) >= top_n else ""
+        console.print()
+        console.print(f"[bold]By {title}[/bold] ({scope}{top_label}):")
+
+        # Process labels (optionally strip domain suffix)
+        processed_items = []
+        for label, count in items:
+            if strip_domain and "_" in label:
+                label = label.split("_")[0]
+            processed_items.append((label, count))
+
+        # Find max label width for alignment
+        max_label = max(len(label) for label, _ in processed_items)
+        max_count = max(count for _, count in processed_items)
+        count_width = len(str(max_count))
+
+        for label, count in processed_items:
+            pct = (count / base_count * 100) if base_count > 0 else 0
+            console.print(
+                f"  {label:<{max_label}}  {count:>{count_width}}  [dim]({pct:.0f}%)[/dim]"
+            )
+
+    print_breakdown("Priority", stats.by_priority)
+    print_breakdown("Module", stats.by_module, top_n=top_n)
+    print_breakdown("Owner", stats.by_owner, top_n=top_n, strip_domain=True)
+    print_breakdown("Type", stats.by_type, top_n=top_n)
+    print_breakdown("Workstream", stats.by_workstream, top_n=top_n)
+
+    console.print()
+
+
+def format_stats_json(stats: Stats) -> str:
+    """Format stats as JSON.
+
+    Args:
+        stats: Stats object with aggregate data.
+
+    Returns:
+        JSON string.
+    """
+    import json
+
+    data: dict[str, object] = {
+        "total": stats.total,
+        "open": stats.open_count,
+        "closed": stats.closed_count,
+        "oldest_open": None,
+        "close_time": None,
+        "by_priority": dict(stats.by_priority),
+        "by_module": dict(stats.by_module),
+        "by_owner": dict(stats.by_owner),
+        "by_type": dict(stats.by_type),
+        "by_workstream": dict(stats.by_workstream),
+    }
+
+    if stats.oldest_open:
+        data["oldest_open"] = {
+            "id": stats.oldest_open.id,
+            "name": stats.oldest_open.name,
+            "created": stats.oldest_open.created,
+        }
+
+    if stats.close_time:
+        data["close_time"] = {
+            "p50_days": stats.close_time.p50,
+            "p75_days": stats.close_time.p75,
+            "avg_days": stats.close_time.avg,
+        }
+
+    return json.dumps(data, indent=2)

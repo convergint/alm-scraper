@@ -11,3 +11,5 @@ wheels/
 
 # Local scratch
 tmp/
+check_rendering.py
+rendering-issues.md
