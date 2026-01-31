@@ -5,6 +5,8 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
+from alm_scraper.utils import write_json
+
 
 class Config(BaseModel):
     """ALM scraper configuration."""
@@ -51,10 +53,5 @@ def save_config(config: Config) -> Path:
         Path to the saved configuration file.
     """
     path = get_config_path()
-    path.parent.mkdir(parents=True, exist_ok=True)
-
-    with path.open("w") as f:
-        json.dump(config.model_dump(), f, indent=2)
-        f.write("\n")
-
+    write_json(path, config.model_dump())
     return path

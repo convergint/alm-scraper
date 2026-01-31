@@ -26,6 +26,60 @@ from alm_scraper.storage import sync_defects
 
 err = Console(stderr=True)
 
+# Hardcoded ALM config - same for all team members
+ALM_BASE_URL = "https://alm.deloitte.com/qcbin"
+ALM_DOMAIN = "CONVERGINT"
+ALM_PROJECT = "Convergint_Transformation"
+ALM_COOKIE_DOMAIN = "alm.deloitte.com"
+ALM_LOGIN_URL = (
+    "https://alm.deloitte.com/qcbin/webrunner/"
+    "#/domains/CONVERGINT/projects/Convergint_Transformation/defects"
+)
+
+
+def require_db() -> None:
+    """Exit with error if database doesn't exist."""
+    db_path = get_db_path()
+    if not db_path.exists():
+        err.print("[red]Error: No defects synced yet.[/red]")
+        err.print()
+        err.print("Run 'alm sync' or 'alm sync-file <file>' first.")
+        sys.exit(1)
+
+
+def _is_oauth_redirect(response: httpx.Response) -> bool:
+    """Check if response is an OAuth redirect (session expired)."""
+    if response.status_code not in (301, 302, 303, 307, 308):
+        return False
+    location = response.headers.get("location", "")
+    return "oauth2" in location or "auth" in location
+
+
+def _handle_http_error(e: httpx.HTTPStatusError) -> None:
+    """Handle HTTP errors with helpful messages."""
+    response = e.response
+
+    if _is_oauth_redirect(response):
+        err.print("[red]Error: Session expired - OAuth re-authentication required[/red]")
+        err.print()
+        err.print("Try auto-extracting cookies from your browser:")
+        err.print("  [bold]alm config import-browser[/bold]")
+        err.print("  [dim](first run will prompt for Keychain access)[/dim]")
+        err.print()
+        err.print("If that doesn't work, log into ALM first:")
+        err.print(f"  {ALM_LOGIN_URL}")
+    elif response.status_code in (401, 403):
+        err.print(f"[red]Error: HTTP {response.status_code} - Authentication failed[/red]")
+        err.print()
+        err.print("Your session may have expired. To refresh:")
+        err.print("  1. Log into ALM in your browser")
+        err.print("  2. Copy a request as cURL from DevTools")
+        err.print("  3. Run: [bold]alm config import-curl[/bold]")
+    else:
+        err.print(f"[red]Error: HTTP {response.status_code}[/red]")
+
+    sys.exit(1)
+
 
 @click.group()
 @click.version_option()
@@ -45,13 +99,7 @@ def main() -> None:
 )
 def show(defect_id: int, output_format: str) -> None:
     """Show details for a specific defect by ID."""
-    db_path = get_db_path()
-
-    if not db_path.exists():
-        err.print("[red]Error: No defects synced yet.[/red]")
-        err.print()
-        err.print("Run 'alm sync' or 'alm sync-file <file>' first.")
-        sys.exit(1)
+    require_db()
 
     defect = get_defect_by_id(defect_id)
 
@@ -101,13 +149,7 @@ def list_cmd(
 
     By default, only open defects are shown. Use --status to override.
     """
-    db_path = get_db_path()
-
-    if not db_path.exists():
-        err.print("[red]Error: No defects synced yet.[/red]")
-        err.print()
-        err.print("Run 'alm sync' or 'alm sync-file <file>' first.")
-        sys.exit(1)
+    require_db()
 
     effective_limit = None if show_all else limit
 
@@ -141,13 +183,7 @@ def list_cmd(
 @click.option("--json", "as_json", is_flag=True, help="Output as JSON")
 def stats(include_closed: bool, top_n: int, as_json: bool) -> None:
     """Show aggregate statistics about defects."""
-    db_path = get_db_path()
-
-    if not db_path.exists():
-        err.print("[red]Error: No defects synced yet.[/red]")
-        err.print()
-        err.print("Run 'alm sync' or 'alm sync-file <file>' first.")
-        sys.exit(1)
+    require_db()
 
     stats_data = get_stats(include_closed=include_closed, top_n=top_n)
 
@@ -220,20 +256,26 @@ def query(sql: str | None, as_csv: bool, as_json: bool) -> None:
 
 
 @main.command()
-def sync() -> None:
+@click.option("--debug", is_flag=True, help="Print request/response debug info")
+def sync(debug: bool) -> None:
     """Sync defects from ALM to local storage."""
     config = load_config()
 
     if config is None:
         err.print("[red]Error: No configuration found.[/red]")
         err.print()
-        err.print("Run 'alm config import-curl' first to set up authentication.")
+        err.print("Log into ALM in your browser, then run:")
+        err.print("  [bold]alm config import-browser[/bold]")
+        err.print("  [dim](first run will prompt for Keychain access)[/dim]")
+        err.print()
+        err.print("If that doesn't work, log into ALM first:")
+        err.print(f"  {ALM_LOGIN_URL}")
         sys.exit(1)
         return  # help type checker
 
     err.print(f"Fetching defects from {config.base_url}...")
 
-    client = ALMClient(config)
+    client = ALMClient(config, debug=debug)
 
     def on_page(page: int, total: int, count: int) -> None:
         err.print(f"  Page {page}/{total}: {count} defects")
@@ -241,14 +283,7 @@ def sync() -> None:
     try:
         data = client.fetch_all_defects(on_page=on_page)
     except httpx.HTTPStatusError as e:
-        err.print(f"[red]Error: HTTP {e.response.status_code}[/red]")
-        if e.response.status_code in (401, 403):
-            err.print()
-            err.print("Your session may have expired. To refresh:")
-            err.print("1. Log into ALM in your browser")
-            err.print("2. Copy a request as cURL from DevTools")
-            err.print("3. Run: alm config import-curl")
-        sys.exit(1)
+        _handle_http_error(e)
     except httpx.RequestError as e:
         err.print(f"[red]Error: {e}[/red]")
         sys.exit(1)
@@ -358,6 +393,59 @@ def import_curl() -> None:
     err.print(f"  domain:   {config_obj.domain}")
     err.print(f"  project:  {config_obj.project}")
     err.print(f"  cookies:  {len(config_obj.cookies)} cookies extracted")
+    err.print()
+    err.print(f"[green]Saved to {path}[/green]")
+
+
+@config.command("import-browser")
+@click.option(
+    "--browser",
+    type=click.Choice(["arc", "chrome", "edge", "firefox"]),
+    help="Force a specific browser",
+)
+def import_browser(browser: str | None) -> None:
+    """Import cookies from your browser's cookie store.
+
+    Searches Arc, Chrome, Edge, and Firefox for ALM cookies.
+    Uses the first browser that has valid cookies.
+    """
+    from alm_scraper.browser import extract_cookies
+
+    err.print("Searching for ALM cookies...")
+    err.print("[dim]Note: First run may prompt for Keychain access.[/dim]")
+    err.print()
+
+    def on_status(name: str, status: str) -> None:
+        err.print(f"  {name}: {status}")
+
+    try:
+        browser_name, cookies = extract_cookies(
+            ALM_COOKIE_DOMAIN, browser=browser, on_status=on_status
+        )
+    except RuntimeError as e:
+        err.print()
+        err.print(f"[red]Error: {e}[/red]")
+        err.print()
+        err.print("Log into ALM in Arc, Chrome, Edge, or Firefox:")
+        err.print(f"  {ALM_LOGIN_URL}")
+        err.print()
+        err.print("Then run 'alm config import-browser' again.")
+        sys.exit(1)
+
+    new_config = Config(
+        base_url=ALM_BASE_URL,
+        domain=ALM_DOMAIN,
+        project=ALM_PROJECT,
+        cookies=cookies,
+    )
+
+    path = save_config(new_config)
+
+    err.print()
+    err.print(f"[green]Imported {len(cookies)} cookies from {browser_name}[/green]")
+    err.print(f"  base_url: {new_config.base_url}")
+    err.print(f"  domain:   {new_config.domain}")
+    err.print(f"  project:  {new_config.project}")
     err.print()
     err.print(f"[green]Saved to {path}[/green]")
 

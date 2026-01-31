@@ -1,6 +1,5 @@
 """Local storage management for defect data."""
 
-import json
 import os
 import sqlite3
 from datetime import UTC, datetime
@@ -9,6 +8,7 @@ from pathlib import Path
 from pydantic import BaseModel
 
 from alm_scraper.defect import Defect
+from alm_scraper.utils import write_json
 
 
 class SyncMeta(BaseModel):
@@ -44,9 +44,7 @@ def write_defects_json(defects: list[Defect], path: Path) -> None:
         path: Path to write to.
     """
     data = [d.model_dump() for d in defects]
-    with path.open("w") as f:
-        json.dump(data, f, indent=2)
-        f.write("\n")
+    write_json(path, data)
 
 
 def build_sqlite_db(defects: list[Defect], db_path: Path) -> None:
@@ -197,9 +195,7 @@ def write_sync_meta(data_dir: Path, defect_count: int, history_base: str) -> Non
     )
 
     meta_path = data_dir / "sync_meta.json"
-    with meta_path.open("w") as f:
-        json.dump(meta.model_dump(), f, indent=2)
-        f.write("\n")
+    write_json(meta_path, meta.model_dump())
 
 
 class SyncResult(BaseModel, arbitrary_types_allowed=True):

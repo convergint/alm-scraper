@@ -3,9 +3,8 @@
 import csv
 import io
 import json
-import sqlite3
 
-from alm_scraper.db import get_db_path
+from alm_scraper.db import get_connection
 
 # Column descriptions for schema documentation
 COLUMN_DOCS = {
@@ -74,33 +73,27 @@ EXAMPLES:
 
 def get_schema_help() -> str:
     """Generate schema documentation."""
-    db_path = get_db_path()
+    try:
+        with get_connection(row_factory=False) as conn:
+            cur = conn.execute("PRAGMA table_info(defects)")
+            rows = cur.fetchall()
 
-    if not db_path.exists():
+            lines = []
+            for row in rows:
+                col_name = row[1]
+                col_type = row[2] or "TEXT"
+                desc = COLUMN_DOCS.get(col_name, "")
+                if desc:
+                    lines.append(f"  {col_name:20} {col_type:10} -- {desc}")
+                else:
+                    lines.append(f"  {col_name:20} {col_type}")
+
+            columns = "\n".join(lines)
+            return SCHEMA_HELP.format(columns=columns)
+    except FileNotFoundError:
         # Return static schema if no DB exists yet
         columns = "\n".join(f"  {col:20} -- {desc}" for col, desc in COLUMN_DOCS.items())
         return SCHEMA_HELP.format(columns=columns)
-
-    # Get actual columns from database
-    conn = sqlite3.connect(db_path)
-    try:
-        cur = conn.execute("PRAGMA table_info(defects)")
-        rows = cur.fetchall()
-
-        lines = []
-        for row in rows:
-            col_name = row[1]
-            col_type = row[2] or "TEXT"
-            desc = COLUMN_DOCS.get(col_name, "")
-            if desc:
-                lines.append(f"  {col_name:20} {col_type:10} -- {desc}")
-            else:
-                lines.append(f"  {col_name:20} {col_type}")
-
-        columns = "\n".join(lines)
-        return SCHEMA_HELP.format(columns=columns)
-    finally:
-        conn.close()
 
 
 def is_safe_query(sql: str) -> bool:
@@ -186,16 +179,8 @@ def execute_query(sql: str) -> QueryResult:
     if not is_safe_query(sql):
         raise ValueError("Only SELECT, WITH, and EXPLAIN queries are allowed")
 
-    db_path = get_db_path()
-
-    if not db_path.exists():
-        raise FileNotFoundError(f"Database not found: {db_path}")
-
-    conn = sqlite3.connect(db_path)
-    try:
+    with get_connection(row_factory=False) as conn:
         cur = conn.execute(sql)
         columns = [desc[0] for desc in cur.description] if cur.description else []
         rows = cur.fetchall()
         return QueryResult(columns=columns, rows=rows)
-    finally:
-        conn.close()

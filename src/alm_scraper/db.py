@@ -1,10 +1,71 @@
 """Database access for defect queries."""
 
 import sqlite3
+from collections.abc import Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 from alm_scraper.defect import Defect
 from alm_scraper.storage import get_data_dir
+
+
+def get_db_path() -> Path:
+    """Get path to the current defects database."""
+    return get_data_dir() / "defects.db"
+
+
+@contextmanager
+def get_connection(
+    row_factory: bool = True,
+) -> Generator[sqlite3.Connection]:
+    """Context manager for database connections.
+
+    Args:
+        row_factory: If True, use sqlite3.Row for dict-like access.
+
+    Yields:
+        Database connection.
+
+    Raises:
+        FileNotFoundError: If database doesn't exist.
+    """
+    db_path = get_db_path()
+    if not db_path.exists():
+        raise FileNotFoundError(f"Database not found: {db_path}")
+
+    conn = sqlite3.connect(db_path)
+    if row_factory:
+        conn.row_factory = sqlite3.Row
+    try:
+        yield conn
+    finally:
+        conn.close()
+
+
+def _add_exact_filter(
+    conditions: list[str],
+    params: list[str],
+    field: str,
+    values: tuple[str, ...],
+) -> None:
+    """Add exact match filter (case-insensitive IN clause)."""
+    if values:
+        placeholders = ",".join("?" * len(values))
+        conditions.append(f"LOWER({field}) IN ({placeholders})")
+        params.extend(v.lower() for v in values)
+
+
+def _add_partial_filter(
+    conditions: list[str],
+    params: list[str],
+    field: str,
+    values: tuple[str, ...],
+) -> None:
+    """Add partial match filter (case-insensitive LIKE with OR)."""
+    if values:
+        like_conditions = [f"LOWER({field}) LIKE ?" for _ in values]
+        conditions.append(f"({' OR '.join(like_conditions)})")
+        params.extend(f"%{v.lower()}%" for v in values)
 
 
 def _row_to_defect(row: sqlite3.Row) -> Defect:
@@ -37,11 +98,6 @@ def _row_to_defect(row: sqlite3.Row) -> Defect:
     )
 
 
-def get_db_path() -> Path:
-    """Get path to the current defects database."""
-    return get_data_dir() / "defects.db"
-
-
 def get_defect_by_id(defect_id: int) -> Defect | None:
     """Fetch a defect by ID from the database.
 
@@ -51,24 +107,14 @@ def get_defect_by_id(defect_id: int) -> Defect | None:
     Returns:
         Defect if found, None otherwise.
     """
-    db_path = get_db_path()
-
-    if not db_path.exists():
-        return None
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
     try:
-        cur = conn.cursor()
-        cur.execute("SELECT * FROM defects WHERE id = ?", (defect_id,))
-        row = cur.fetchone()
-
-        if not row:
-            return None
-
-        return _row_to_defect(row)
-    finally:
-        conn.close()
+        with get_connection() as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT * FROM defects WHERE id = ?", (defect_id,))
+            row = cur.fetchone()
+            return _row_to_defect(row) if row else None
+    except FileNotFoundError:
+        return None
 
 
 def list_defects(
@@ -96,83 +142,48 @@ def list_defects(
     Returns:
         List of matching defects, sorted by priority then created date.
     """
-    db_path = get_db_path()
-
-    if not db_path.exists():
-        return []
-
-    conn = sqlite3.connect(db_path)
-    conn.row_factory = sqlite3.Row
     try:
-        conditions: list[str] = []
-        params: list[str] = []
+        with get_connection() as conn:
+            conditions: list[str] = []
+            params: list[str] = []
 
-        # Exact match filters (case-insensitive)
-        if status:
-            placeholders = ",".join("?" * len(status))
-            conditions.append(f"LOWER(status) IN ({placeholders})")
-            params.extend(s.lower() for s in status)
+            # Exact match filters
+            _add_exact_filter(conditions, params, "status", status)
+            _add_exact_filter(conditions, params, "priority", priority)
 
-        if priority:
-            placeholders = ",".join("?" * len(priority))
-            conditions.append(f"LOWER(priority) IN ({placeholders})")
-            params.extend(p.lower() for p in priority)
+            # Partial match filters
+            _add_partial_filter(conditions, params, "owner", owner)
+            _add_partial_filter(conditions, params, "module", module)
+            _add_partial_filter(conditions, params, "defect_type", defect_type)
+            _add_partial_filter(conditions, params, "workstream", workstream)
 
-        # Partial match filters (case-insensitive LIKE)
-        if owner:
-            owner_conditions = ["LOWER(owner) LIKE ?" for _ in owner]
-            conditions.append(f"({' OR '.join(owner_conditions)})")
-            params.extend(f"%{o.lower()}%" for o in owner)
+            where = " AND ".join(conditions) if conditions else "1=1"
+            query = f"""
+                SELECT * FROM defects
+                WHERE {where}
+                ORDER BY priority ASC, created ASC
+            """
 
-        if module:
-            module_conditions = ["LOWER(module) LIKE ?" for _ in module]
-            conditions.append(f"({' OR '.join(module_conditions)})")
-            params.extend(f"%{m.lower()}%" for m in module)
+            if limit is not None:
+                query += " LIMIT ?"
+                params.append(str(limit))
 
-        if defect_type:
-            type_conditions = ["LOWER(defect_type) LIKE ?" for _ in defect_type]
-            conditions.append(f"({' OR '.join(type_conditions)})")
-            params.extend(f"%{t.lower()}%" for t in defect_type)
-
-        if workstream:
-            ws_conditions = ["LOWER(workstream) LIKE ?" for _ in workstream]
-            conditions.append(f"({' OR '.join(ws_conditions)})")
-            params.extend(f"%{w.lower()}%" for w in workstream)
-
-        where = " AND ".join(conditions) if conditions else "1=1"
-        query = f"""
-            SELECT * FROM defects
-            WHERE {where}
-            ORDER BY priority ASC, created ASC
-        """
-
-        if limit is not None:
-            query += " LIMIT ?"
-            params.append(str(limit))
-
-        cur = conn.cursor()
-        cur.execute(query, params)
-        rows = cur.fetchall()
-
-        return [_row_to_defect(row) for row in rows]
-    finally:
-        conn.close()
+            cur = conn.cursor()
+            cur.execute(query, params)
+            return [_row_to_defect(row) for row in cur.fetchall()]
+    except FileNotFoundError:
+        return []
 
 
 def count_defects() -> int:
     """Return total number of defects in the database."""
-    db_path = get_db_path()
-
-    if not db_path.exists():
-        return 0
-
-    conn = sqlite3.connect(db_path)
     try:
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM defects")
-        return cur.fetchone()[0]
-    finally:
-        conn.close()
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM defects")
+            return cur.fetchone()[0]
+    except FileNotFoundError:
+        return 0
 
 
 class OldestDefect:
@@ -221,6 +232,26 @@ class Stats:
         self.close_time = close_time
 
 
+def _get_breakdown(
+    cur: sqlite3.Cursor,
+    field: str,
+    status_filter: str,
+    limit: int | None = None,
+) -> list[tuple[str, int]]:
+    """Get count breakdown by field."""
+    query = f"""
+        SELECT {field}, COUNT(*) as count
+        FROM defects {status_filter}
+        GROUP BY {field}
+        ORDER BY count DESC
+    """
+    if limit:
+        cur.execute(query + " LIMIT ?", (limit,))
+    else:
+        cur.execute(query)
+    return [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+
+
 def get_stats(include_closed: bool = False, top_n: int = 5) -> Stats | None:
     """Get aggregate statistics about defects.
 
@@ -231,133 +262,71 @@ def get_stats(include_closed: bool = False, top_n: int = 5) -> Stats | None:
     Returns:
         Stats object, or None if no database exists.
     """
-    db_path = get_db_path()
-
-    if not db_path.exists():
-        return None
-
-    conn = sqlite3.connect(db_path)
     try:
-        cur = conn.cursor()
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
 
-        # Total counts (always show both)
-        cur.execute("SELECT COUNT(*) FROM defects")
-        total = cur.fetchone()[0]
+            # Total counts (always show both)
+            cur.execute("SELECT COUNT(*) FROM defects")
+            total = cur.fetchone()[0]
 
-        cur.execute("SELECT COUNT(*) FROM defects WHERE LOWER(status) = 'open'")
-        open_count = cur.fetchone()[0]
+            cur.execute("SELECT COUNT(*) FROM defects WHERE LOWER(status) = 'open'")
+            open_count = cur.fetchone()[0]
 
-        closed_count = total - open_count
+            closed_count = total - open_count
 
-        # Status filter for breakdowns
-        status_filter = "" if include_closed else "WHERE LOWER(status) = 'open'"
+            # Status filter for breakdowns
+            status_filter = "" if include_closed else "WHERE LOWER(status) = 'open'"
 
-        # By priority (show all, sorted by priority)
-        cur.execute(f"""
-            SELECT priority, COUNT(*) as count
-            FROM defects {status_filter}
-            GROUP BY priority
-            ORDER BY priority ASC
-        """)
-        by_priority = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+            # Get breakdowns
+            by_priority = _get_breakdown(cur, "priority", status_filter)
+            by_priority.sort(key=lambda x: x[0])  # Sort by priority name
+            by_module = _get_breakdown(cur, "module", status_filter, top_n)
+            by_owner = _get_breakdown(cur, "owner", status_filter, top_n)
+            by_type = _get_breakdown(cur, "defect_type", status_filter, top_n)
+            by_workstream = _get_breakdown(cur, "workstream", status_filter, top_n)
 
-        # By module (top N)
-        cur.execute(
-            f"""
-            SELECT module, COUNT(*) as count
-            FROM defects {status_filter}
-            GROUP BY module
-            ORDER BY count DESC
-            LIMIT ?
-        """,
-            (top_n,),
-        )
-        by_module = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+            # Oldest open defect
+            oldest_open = None
+            cur.execute("""
+                SELECT id, name, created
+                FROM defects
+                WHERE LOWER(status) = 'open' AND created IS NOT NULL
+                ORDER BY created ASC
+                LIMIT 1
+            """)
+            row = cur.fetchone()
+            if row:
+                oldest_open = OldestDefect(id=row[0], name=row[1], created=row[2])
 
-        # By owner (top N)
-        cur.execute(
-            f"""
-            SELECT owner, COUNT(*) as count
-            FROM defects {status_filter}
-            GROUP BY owner
-            ORDER BY count DESC
-            LIMIT ?
-        """,
-            (top_n,),
-        )
-        by_owner = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+            # Close time stats (for defects with both created and closed dates)
+            close_time = None
+            cur.execute("""
+                SELECT julianday(closed) - julianday(created) as days
+                FROM defects
+                WHERE closed IS NOT NULL AND created IS NOT NULL
+                ORDER BY days ASC
+            """)
+            close_days = [row[0] for row in cur.fetchall() if row[0] is not None and row[0] >= 0]
 
-        # By type (top N)
-        cur.execute(
-            f"""
-            SELECT defect_type, COUNT(*) as count
-            FROM defects {status_filter}
-            GROUP BY defect_type
-            ORDER BY count DESC
-            LIMIT ?
-        """,
-            (top_n,),
-        )
-        by_type = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
+            if close_days:
+                n = len(close_days)
+                p50 = close_days[n // 2]
+                p75 = close_days[min(int(n * 0.75), n - 1)]
+                avg = sum(close_days) / n
+                close_time = CloseTimeStats(p50=p50, p75=p75, avg=avg)
 
-        # By workstream (top N)
-        cur.execute(
-            f"""
-            SELECT workstream, COUNT(*) as count
-            FROM defects {status_filter}
-            GROUP BY workstream
-            ORDER BY count DESC
-            LIMIT ?
-        """,
-            (top_n,),
-        )
-        by_workstream = [(row[0] or "(none)", row[1]) for row in cur.fetchall()]
-
-        # Oldest open defect
-        oldest_open = None
-        cur.execute("""
-            SELECT id, name, created
-            FROM defects
-            WHERE LOWER(status) = 'open' AND created IS NOT NULL
-            ORDER BY created ASC
-            LIMIT 1
-        """)
-        row = cur.fetchone()
-        if row:
-            oldest_open = OldestDefect(id=row[0], name=row[1], created=row[2])
-
-        # Close time stats (for defects with both created and closed dates)
-        close_time = None
-        cur.execute("""
-            SELECT julianday(closed) - julianday(created) as days
-            FROM defects
-            WHERE closed IS NOT NULL AND created IS NOT NULL
-            ORDER BY days ASC
-        """)
-        close_days = [row[0] for row in cur.fetchall() if row[0] is not None and row[0] >= 0]
-
-        if close_days:
-            n = len(close_days)
-            p50_idx = n // 2
-            p75_idx = int(n * 0.75)
-
-            p50 = close_days[p50_idx]
-            p75 = close_days[min(p75_idx, n - 1)]
-            avg = sum(close_days) / n
-
-            close_time = CloseTimeStats(p50=p50, p75=p75, avg=avg)
-
-        return Stats(
-            total=total,
-            open_count=open_count,
-            closed_count=closed_count,
-            by_priority=by_priority,
-            by_module=by_module,
-            by_owner=by_owner,
-            by_type=by_type,
-            by_workstream=by_workstream,
-            oldest_open=oldest_open,
-            close_time=close_time,
-        )
-    finally:
-        conn.close()
+            return Stats(
+                total=total,
+                open_count=open_count,
+                closed_count=closed_count,
+                by_priority=by_priority,
+                by_module=by_module,
+                by_owner=by_owner,
+                by_type=by_type,
+                by_workstream=by_workstream,
+                oldest_open=oldest_open,
+                close_time=close_time,
+            )
+    except FileNotFoundError:
+        return None

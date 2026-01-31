@@ -12,16 +12,18 @@ from alm_scraper.config import Config
 class ALMClient:
     """Client for ALM REST API."""
 
-    def __init__(self, config: Config) -> None:
+    def __init__(self, config: Config, debug: bool = False) -> None:
         """Initialize the client.
 
         Args:
             config: Configuration with base_url, domain, project, and cookies.
+            debug: If True, print request/response details.
         """
         self.config = config
         self.base_url = config.base_url
         self.domain = config.domain
         self.project = config.project
+        self.debug = debug
 
         # Build cookie header string
         cookie_str = "; ".join(f"{k}={v}" for k, v in config.cookies.items())
@@ -53,15 +55,37 @@ class ALMClient:
             "order-by": "{id[asc];}",
         }
 
-        response = httpx.get(url, headers=self.headers, params=params, timeout=60.0)
+        if self.debug:
+            import sys
+
+            print(f"[DEBUG] GET {url}", file=sys.stderr)
+            print(f"[DEBUG] Params: {params}", file=sys.stderr)
+            print(f"[DEBUG] Headers: {self.headers}", file=sys.stderr)
+
+        # Don't follow redirects - ALM redirects to login on auth failure
+        response = httpx.get(
+            url, headers=self.headers, params=params, timeout=60.0, follow_redirects=False
+        )
+
+        if self.debug:
+            print(f"[DEBUG] Status: {response.status_code}", file=sys.stderr)
+            print("[DEBUG] Response headers:", file=sys.stderr)
+            for k, v in response.headers.items():
+                print(f"[DEBUG]   {k}: {v}", file=sys.stderr)
+            if response.status_code >= 400 or response.status_code in (301, 302, 303, 307, 308):
+                # Show body for errors/redirects
+                body = response.text[:1000]
+                print("[DEBUG] Response body (first 1000 chars):", file=sys.stderr)
+                print(f"[DEBUG]   {body}", file=sys.stderr)
+
         response.raise_for_status()
 
         return response.json()
 
     def fetch_all_defects(
         self,
-        page_size: int = 1000,
-        delay: float = 1.5,
+        page_size: int = 500,
+        delay: float = 1.0,
         on_page: Callable[[int, int, int], None] | None = None,
     ) -> dict[str, Any]:
         """Fetch all defects with pagination.
@@ -98,9 +122,9 @@ class ALMClient:
             if len(entities) < page_size or len(all_entities) >= total_results:
                 break
 
-            # Be polite - wait between requests
-            time.sleep(delay)
+            # Be polite - wait between requests (but not before first request)
             start_index += page_size
+            time.sleep(delay)
 
         return {
             "entities": all_entities,

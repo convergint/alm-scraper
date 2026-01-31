@@ -7,6 +7,7 @@ from rich.text import Text
 
 from alm_scraper.db import Stats
 from alm_scraper.defect import Defect, strip_html_preserve_structure
+from alm_scraper.utils import strip_domain, truncate
 
 
 def format_defect(defect: Defect, console: Console) -> None:
@@ -216,22 +217,14 @@ def format_defect_table(
         status_style = _get_status_color(d.status)
         priority_style = _get_priority_color(d.priority)
 
-        # Truncate name to fit
-        name = d.name or ""
-        if len(name) > 45:
-            name = name[:42] + "..."
+        name = truncate(d.name or "", 45)
 
         # Short priority (P1, P2, P3, P4)
         pri = d.priority or "-"
         if pri.startswith("P") and "-" in pri:
             pri = pri.split("-")[0]
 
-        # Truncate owner (remove domain suffix if present)
-        owner = d.owner or "-"
-        if "_" in owner:
-            owner = owner.split("_")[0]
-        if len(owner) > 15:
-            owner = owner[:12] + "..."
+        owner = truncate(strip_domain(d.owner or "-"), 15)
 
         table.add_row(
             f"#{d.id}",
@@ -296,13 +289,8 @@ def format_defects_markdown(defects: list[Defect]) -> str:
     ]
 
     for d in defects:
-        name = d.name or ""
-        if len(name) > 50:
-            name = name[:47] + "..."
-        owner = d.owner or "-"
-        if "_" in owner:
-            owner = owner.split("_")[0]
-
+        name = truncate(d.name or "", 50)
+        owner = strip_domain(d.owner or "-")
         lines.append(f"| #{d.id} | {d.status or '-'} | {d.priority or '-'} | {name} | {owner} |")
 
     return "\n".join(lines)
@@ -350,23 +338,21 @@ def format_stats(
     def print_breakdown(
         title: str,
         items: list[tuple[str, int]],
-        top_n: int | None = None,
-        strip_domain: bool = False,
+        top_n_limit: int | None = None,
+        should_strip_domain: bool = False,
     ) -> None:
         if not items:
             return
 
         # Only show "top N" if we actually limited results
-        top_label = f", top {len(items)}" if top_n and len(items) >= top_n else ""
+        top_label = f", top {len(items)}" if top_n_limit and len(items) >= top_n_limit else ""
         console.print()
         console.print(f"[bold]By {title}[/bold] ({scope}{top_label}):")
 
         # Process labels (optionally strip domain suffix)
-        processed_items = []
-        for label, count in items:
-            if strip_domain and "_" in label:
-                label = label.split("_")[0]
-            processed_items.append((label, count))
+        processed_items = [
+            (strip_domain(label) if should_strip_domain else label, count) for label, count in items
+        ]
 
         # Find max label width for alignment
         max_label = max(len(label) for label, _ in processed_items)
@@ -380,10 +366,10 @@ def format_stats(
             )
 
     print_breakdown("Priority", stats.by_priority)
-    print_breakdown("Module", stats.by_module, top_n=top_n)
-    print_breakdown("Owner", stats.by_owner, top_n=top_n, strip_domain=True)
-    print_breakdown("Type", stats.by_type, top_n=top_n)
-    print_breakdown("Workstream", stats.by_workstream, top_n=top_n)
+    print_breakdown("Module", stats.by_module, top_n_limit=top_n)
+    print_breakdown("Owner", stats.by_owner, top_n_limit=top_n, should_strip_domain=True)
+    print_breakdown("Type", stats.by_type, top_n_limit=top_n)
+    print_breakdown("Workstream", stats.by_workstream, top_n_limit=top_n)
 
     console.print()
 
