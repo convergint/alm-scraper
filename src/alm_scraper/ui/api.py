@@ -207,30 +207,38 @@ async def get_defects(
     """List defects with optional filtering and pagination."""
     offset = (page - 1) * limit
 
-    # Use search if query provided
+    # Build filter kwargs
+    filters = {
+        "status": (status,) if status else None,
+        "priority": (priority,) if priority else None,
+        "owner": (owner,) if owner else None,
+        "module": (module,) if module else None,
+        "defect_type": (defect_type,) if defect_type else None,
+        "workstream": (workstream,) if workstream else None,
+    }
+
+    # Use search if query provided, then apply filters
     if q:
-        defects = search_defects(q, limit=limit)
-        total = len(defects)  # TODO: get actual total from search
+        # Search returns all matches, we filter and paginate in memory
+        all_results = search_defects(q, limit=500)  # Get more results to filter
+        # Apply status filter (most common filter)
+        if status:
+            status_lower = status.lower()
+            all_results = [d for d in all_results if d.status and d.status.lower() == status_lower]
+        if priority:
+            all_results = [d for d in all_results if d.priority == priority]
+        if owner:
+            all_results = [d for d in all_results if d.owner and owner.lower() in d.owner.lower()]
+
+        total = len(all_results)
+        defects = all_results[offset : offset + limit]
     else:
         defects = list_defects(
-            status=(status,) if status else None,
-            priority=(priority,) if priority else None,
-            owner=(owner,) if owner else None,
-            module=(module,) if module else None,
-            defect_type=(defect_type,) if defect_type else None,
-            workstream=(workstream,) if workstream else None,
+            **filters,
             limit=limit,
             offset=offset,
         )
-        # Get total count for pagination
-        total = count_defects(
-            status=(status,) if status else None,
-            priority=(priority,) if priority else None,
-            owner=(owner,) if owner else None,
-            module=(module,) if module else None,
-            defect_type=(defect_type,) if defect_type else None,
-            workstream=(workstream,) if workstream else None,
-        )
+        total = count_defects(**filters)
 
     pages = (total + limit - 1) // limit if total > 0 else 1
 
