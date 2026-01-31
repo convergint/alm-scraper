@@ -39,6 +39,12 @@ class Defect(BaseModel):
     module: str | None = None  # user-template-03
     target_date: str | None = None  # user-template-12
 
+    # Extracted scenario/test references from title
+    scenarios: list[str] = []  # Test scenarios referenced (A01, A18, C09, etc.)
+    blocks: list[str] = []  # Scenarios this defect blocks
+    integrations: list[str] = []  # Integration references (INT35, INT66, etc.)
+    clean_name: str | None = None  # Title with prefixes removed
+
 
 class HTMLTextExtractor(html.parser.HTMLParser):
     """Extract plain text from HTML, preserving block structure."""
@@ -75,6 +81,87 @@ class HTMLTextExtractor(html.parser.HTMLParser):
 
     def get_text(self) -> str:
         return "".join(self.text_parts)
+
+
+def extract_scenario_codes(name: str) -> tuple[list[str], list[str], list[str], str]:
+    """Extract scenario codes, blocking refs, and integrations from a defect title.
+
+    Args:
+        name: The defect title/name.
+
+    Returns:
+        Tuple of (scenarios, blocks, integrations, clean_name).
+    """
+    if not name:
+        return [], [], [], name
+
+    scenarios: set[str] = set()
+    blocks: set[str] = set()
+    integrations: set[str] = set()
+
+    # Pattern for scenario codes like A01, A18, C09, E06, F13
+    scenario_pattern = re.compile(r"\b([A-F]\d{2})\b")
+
+    # Pattern for integration references like INT35, INT 66
+    int_pattern = re.compile(r"\bINT\s*(\d+)\b", re.IGNORECASE)
+
+    # Find all scenario codes in the title
+    all_scenarios = scenario_pattern.findall(name)
+    scenarios.update(all_scenarios)
+
+    # Find all integration references
+    for match in int_pattern.finditer(name):
+        integrations.add(f"INT{match.group(1)}")
+
+    # Check for blocking patterns and extract which scenarios are blocked
+    # Patterns: [Blocks A18], [Blocks: A18, A07], |Blocks A14,A23|, Blocks- A10, A14
+    block_patterns = [
+        r"\[\s*Blocks?\s*[:\-]?\s*([^\]]+)\]",  # [Blocks A18] or [Blocks: A18, A07]
+        r"\|\s*Blocks?\s*([^|]+)\|",  # |Blocks A14,A23|
+        r"Blocks?\s*[:\-]\s*([A-F]\d{2}(?:\s*,\s*[A-F]\d{2})*)",  # Blocks- A10, A14
+    ]
+
+    for pattern in block_patterns:
+        for match in re.finditer(pattern, name, re.IGNORECASE):
+            blocked_text = match.group(1)
+            blocked_scenarios = scenario_pattern.findall(blocked_text)
+            blocks.update(blocked_scenarios)
+
+    # Generate clean name by removing prefix patterns
+    clean_name = name
+
+    # Remove E2E prefixes like "E2E Cycle 1 |", "E2E Smoke-", "E2E-", "E2E/"
+    clean_name = re.sub(r"^\s*E2E\s*(Cycle\s*\d+\s*)?[|/]?\s*", "", clean_name, flags=re.IGNORECASE)
+    clean_name = re.sub(r"^\s*E2E\s*Smoke\s*[:\-]?\s*", "", clean_name, flags=re.IGNORECASE)
+
+    # Remove leading bracket patterns like [A18], [Blocks A18], [ Blocks A18]
+    clean_name = re.sub(r"^\s*\[[^\]]*\]\s*", "", clean_name)
+
+    # Remove leading pipe patterns like |A20|, |Blocks A18|
+    clean_name = re.sub(r"^\s*\|[^|]*\|\s*", "", clean_name)
+
+    # Remove leading code patterns like A18:, A18 |, A18-, A01:
+    clean_name = re.sub(r"^\s*[A-F]\d{2}\s*[:\|\-]\s*", "", clean_name)
+
+    # Remove leading "Blocks- A10, A14 |" patterns
+    clean_name = re.sub(
+        r"^\s*Blocks?\s*[:\-]\s*[A-F]\d{2}(?:\s*,\s*[A-F]\d{2})*\s*\|?\s*",
+        "",
+        clean_name,
+        flags=re.IGNORECASE,
+    )
+
+    # Remove any remaining leading pipes, colons, or dashes
+    clean_name = re.sub(r"^\s*[|:\-]+\s*", "", clean_name)
+
+    # Clean up multiple spaces
+    clean_name = re.sub(r"\s+", " ", clean_name).strip()
+
+    # If clean_name is empty or same as original, use original
+    if not clean_name or clean_name == name:
+        clean_name = name
+
+    return sorted(scenarios), sorted(blocks), sorted(integrations), clean_name
 
 
 def strip_html(html_content: str | None) -> str | None:
@@ -157,6 +244,9 @@ def parse_alm_entity(entity: dict[str, Any]) -> Defect:
     defect_id = int(fields.get("id") or 0)
     name = fields.get("name") or ""
 
+    # Extract scenario codes and clean name from title
+    scenarios, blocks, integrations, clean_name = extract_scenario_codes(name)
+
     # Parse optional fields
     description_html = fields.get("description")
     dev_comments_html = fields.get("dev-comments")
@@ -168,6 +258,10 @@ def parse_alm_entity(entity: dict[str, Any]) -> Defect:
     return Defect(
         id=defect_id,
         name=name,
+        scenarios=scenarios,
+        blocks=blocks,
+        integrations=integrations,
+        clean_name=clean_name,
         status=fields.get("status"),
         priority=fields.get("priority"),
         severity=fields.get("severity"),

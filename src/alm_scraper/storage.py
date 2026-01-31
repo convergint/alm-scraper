@@ -88,7 +88,11 @@ def build_sqlite_db(defects: list[Defect], db_path: Path) -> None:
                 application TEXT,
                 workstream TEXT,
                 module TEXT,
-                target_date TEXT
+                target_date TEXT,
+                scenarios TEXT,
+                blocks TEXT,
+                integrations TEXT,
+                clean_name TEXT
             )
         """)
 
@@ -114,8 +118,12 @@ def build_sqlite_db(defects: list[Defect], db_path: Path) -> None:
                     description, description_html, dev_comments, dev_comments_html,
                     created, modified, closed, reproducible, attachment,
                     detected_in_rel, detected_in_rcyc, actual_fix_time,
-                    defect_type, application, workstream, module, target_date
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    defect_type, application, workstream, module, target_date,
+                    scenarios, blocks, integrations, clean_name
+                ) VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
                 """,
                 (
                     defect.id,
@@ -142,6 +150,10 @@ def build_sqlite_db(defects: list[Defect], db_path: Path) -> None:
                     defect.workstream,
                     defect.module,
                     defect.target_date,
+                    ",".join(defect.scenarios) if defect.scenarios else None,
+                    ",".join(defect.blocks) if defect.blocks else None,
+                    ",".join(defect.integrations) if defect.integrations else None,
+                    defect.clean_name,
                 ),
             )
 

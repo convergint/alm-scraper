@@ -11,7 +11,7 @@ from lxml import html as lxml_html
 from lxml_html_clean import Cleaner
 
 from alm_scraper.db import (
-    count_defects,
+    get_connection,
     get_defect_by_id,
     list_defects,
     search_defects,
@@ -200,6 +200,8 @@ async def get_defects(
     module: str | None = None,
     defect_type: str | None = None,
     workstream: str | None = None,
+    scenario: str | None = None,
+    blocking: str | None = None,
     q: str | None = None,
     page: int = Query(default=1, ge=1),
     limit: int = Query(default=50, ge=1, le=100),
@@ -217,6 +219,15 @@ async def get_defects(
         "workstream": (workstream,) if workstream else None,
     }
 
+    # Helper to filter by scenario codes
+    def filter_by_scenario(defects: list, scenario: str | None, blocking: str | None) -> list:
+        result = defects
+        if scenario:
+            result = [d for d in result if scenario in d.scenarios]
+        if blocking:
+            result = [d for d in result if blocking in d.blocks]
+        return result
+
     # Use search if query provided, then apply filters
     if q:
         # Search returns all matches, we filter and paginate in memory
@@ -230,15 +241,22 @@ async def get_defects(
         if owner:
             all_results = [d for d in all_results if d.owner and owner.lower() in d.owner.lower()]
 
+        # Apply scenario filters
+        all_results = filter_by_scenario(all_results, scenario, blocking)
+
         total = len(all_results)
         defects = all_results[offset : offset + limit]
     else:
         defects = list_defects(
             **filters,
-            limit=limit,
-            offset=offset,
+            limit=None,  # Get all for scenario filtering
+            offset=0,
         )
-        total = count_defects(**filters)
+        # Apply scenario filters (done in memory since it's a list field)
+        defects = filter_by_scenario(defects, scenario, blocking)
+        total = len(defects)
+        # Paginate
+        defects = defects[offset : offset + limit]
 
     pages = (total + limit - 1) // limit if total > 0 else 1
 
@@ -248,6 +266,35 @@ async def get_defects(
         "page": page,
         "pages": pages,
     }
+
+
+@app.get("/api/scenarios")
+async def get_scenarios() -> dict:
+    """Get all unique scenario codes for filtering."""
+    try:
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+            cur.execute("SELECT scenarios FROM defects WHERE scenarios IS NOT NULL")
+            all_scenarios: set[str] = set()
+            all_blocks: set[str] = set()
+            all_integrations: set[str] = set()
+
+            cur.execute("SELECT scenarios, blocks, integrations FROM defects")
+            for row in cur.fetchall():
+                if row[0]:
+                    all_scenarios.update(s.strip() for s in row[0].split(",") if s.strip())
+                if row[1]:
+                    all_blocks.update(s.strip() for s in row[1].split(",") if s.strip())
+                if row[2]:
+                    all_integrations.update(s.strip() for s in row[2].split(",") if s.strip())
+
+            return {
+                "scenarios": sorted(all_scenarios),
+                "blocks": sorted(all_blocks),
+                "integrations": sorted(all_integrations),
+            }
+    except FileNotFoundError:
+        return {"scenarios": [], "blocks": [], "integrations": []}
 
 
 @app.get("/api/defects/{defect_id}")

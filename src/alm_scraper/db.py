@@ -68,6 +68,13 @@ def _add_partial_filter(
         params.extend(f"%{v.lower()}%" for v in values)
 
 
+def _parse_csv_field(value: str | None) -> list[str]:
+    """Parse a comma-separated field into a list."""
+    if not value:
+        return []
+    return [v.strip() for v in value.split(",") if v.strip()]
+
+
 def _row_to_defect(row: sqlite3.Row) -> Defect:
     """Convert a database row to a Defect object."""
     return Defect(
@@ -95,6 +102,10 @@ def _row_to_defect(row: sqlite3.Row) -> Defect:
         workstream=row["workstream"],
         module=row["module"],
         target_date=row["target_date"],
+        scenarios=_parse_csv_field(row["scenarios"]),
+        blocks=_parse_csv_field(row["blocks"]),
+        integrations=_parse_csv_field(row["integrations"]),
+        clean_name=row["clean_name"],
     )
 
 

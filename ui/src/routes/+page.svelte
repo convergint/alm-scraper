@@ -3,6 +3,7 @@
 	import type { Defect, DefectsResponse } from '$lib/types';
 	import { goto } from '$app/navigation';
 	import { Button } from '$lib/components/ui/button';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import * as Table from '$lib/components/ui/table';
 	import * as Select from '$lib/components/ui/select';
@@ -156,7 +157,29 @@
 								#{defect.id}
 							</a>
 						</Table.Cell>
-						<Table.Cell class="max-w-md truncate" title={defect.name}>{defect.name}</Table.Cell>
+						<Table.Cell class="max-w-lg">
+							<div class="flex items-center gap-2 flex-wrap">
+								{#if defect.blocks && defect.blocks.length > 0}
+									<Badge variant="destructive" class="text-xs px-1.5 py-0">
+										Blocks {defect.blocks.join(', ')}
+									</Badge>
+								{/if}
+								{#if defect.scenarios && defect.scenarios.length > 0}
+									{#each defect.scenarios.slice(0, 3) as scenario}
+										<Badge variant="secondary" class="text-xs px-1.5 py-0">{scenario}</Badge>
+									{/each}
+									{#if defect.scenarios.length > 3}
+										<Badge variant="outline" class="text-xs px-1.5 py-0">+{defect.scenarios.length - 3}</Badge>
+									{/if}
+								{/if}
+								{#if defect.integrations && defect.integrations.length > 0}
+									{#each defect.integrations.slice(0, 2) as integration}
+										<Badge variant="outline" class="text-xs px-1.5 py-0 text-blue-400">{integration}</Badge>
+									{/each}
+								{/if}
+								<span class="truncate" title={defect.name}>{defect.clean_name || defect.name}</span>
+							</div>
+						</Table.Cell>
 						<Table.Cell class="text-center">
 							{@const p = getPriorityIndicator(defect.priority)}
 							<span class="inline-flex items-center justify-center" title={defect.priority || 'No priority'}>

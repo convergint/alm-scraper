@@ -76,9 +76,9 @@
 		<!-- Header -->
 		<div class="mb-8">
 			<div class="text-muted-foreground mb-2">#{defect.id}</div>
-			<h1 class="text-2xl font-bold mb-4">{defect.name}</h1>
+			<h1 class="text-2xl font-bold mb-4">{defect.clean_name || defect.name}</h1>
 
-			<div class="flex flex-wrap gap-2">
+			<div class="flex flex-wrap gap-2 mb-3">
 				<Badge variant={defect.status === 'Open' ? 'default' : 'secondary'}>
 					{defect.status || 'Unknown'}
 				</Badge>
@@ -86,6 +86,27 @@
 					{defect.priority || 'No priority'}
 				</Badge>
 			</div>
+
+			<!-- Scenario codes -->
+			{#if (defect.scenarios && defect.scenarios.length > 0) || (defect.blocks && defect.blocks.length > 0) || (defect.integrations && defect.integrations.length > 0)}
+				<div class="flex flex-wrap gap-2">
+					{#if defect.blocks && defect.blocks.length > 0}
+						<Badge variant="destructive">
+							Blocks: {defect.blocks.join(', ')}
+						</Badge>
+					{/if}
+					{#if defect.scenarios && defect.scenarios.length > 0}
+						{#each defect.scenarios as scenario}
+							<Badge variant="secondary">{scenario}</Badge>
+						{/each}
+					{/if}
+					{#if defect.integrations && defect.integrations.length > 0}
+						{#each defect.integrations as integration}
+							<Badge variant="outline" class="text-blue-400">{integration}</Badge>
+						{/each}
+					{/if}
+				</div>
+			{/if}
 		</div>
 
 		<!-- Metadata grid -->
