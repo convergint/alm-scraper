@@ -9,9 +9,16 @@ from rich.console import Console
 from alm_scraper.api import ALMClient
 from alm_scraper.config import Config, get_config_path, load_config, save_config
 from alm_scraper.curl_parser import parse_curl
-from alm_scraper.db import get_db_path, get_defect_by_id
+from alm_scraper.db import count_defects, get_db_path, get_defect_by_id, list_defects
 from alm_scraper.defect import parse_alm_response
-from alm_scraper.display import format_defect, format_defect_json, format_defect_markdown
+from alm_scraper.display import (
+    format_defect,
+    format_defect_json,
+    format_defect_markdown,
+    format_defect_table,
+    format_defects_json,
+    format_defects_markdown,
+)
 from alm_scraper.storage import sync_defects
 
 err = Console(stderr=True)
@@ -57,6 +64,72 @@ def show(defect_id: int, output_format: str) -> None:
         print(format_defect_markdown(defect))
     elif output_format == "json":
         print(format_defect_json(defect))
+
+
+@main.command("list")
+@click.option("-s", "--status", multiple=True, help="Filter by status (can repeat)")
+@click.option("-o", "--owner", multiple=True, help="Filter by owner (can repeat)")
+@click.option("-m", "--module", multiple=True, help="Filter by module (can repeat)")
+@click.option("-t", "--type", "defect_type", multiple=True, help="Filter by type (can repeat)")
+@click.option("-p", "--priority", multiple=True, help="Filter by priority (can repeat)")
+@click.option("-w", "--workstream", multiple=True, help="Filter by workstream (can repeat)")
+@click.option("-n", "--limit", default=50, help="Maximum results [default: 50]")
+@click.option("--all", "show_all", is_flag=True, help="Show all results (no limit)")
+@click.option(
+    "-f",
+    "--format",
+    "output_format",
+    type=click.Choice(["table", "markdown", "md", "json"]),
+    default="table",
+    help="Output format [default: table]",
+)
+def list_cmd(
+    status: tuple[str, ...],
+    owner: tuple[str, ...],
+    module: tuple[str, ...],
+    defect_type: tuple[str, ...],
+    priority: tuple[str, ...],
+    workstream: tuple[str, ...],
+    limit: int,
+    show_all: bool,
+    output_format: str,
+) -> None:
+    """List defects with optional filtering.
+
+    By default, only open defects are shown. Use --status to override.
+    """
+    db_path = get_db_path()
+
+    if not db_path.exists():
+        err.print("[red]Error: No defects synced yet.[/red]")
+        err.print()
+        err.print("Run 'alm sync' or 'alm sync-file <file>' first.")
+        sys.exit(1)
+
+    effective_limit = None if show_all else limit
+
+    # Default to open defects if no status filter provided
+    effective_status = status if status else ("open",)
+
+    defects = list_defects(
+        status=effective_status,
+        owner=owner,
+        module=module,
+        defect_type=defect_type,
+        priority=priority,
+        workstream=workstream,
+        limit=effective_limit,
+    )
+
+    total = count_defects()
+
+    if output_format == "table":
+        out = Console()
+        format_defect_table(defects, out, total_count=total)
+    elif output_format in ("markdown", "md"):
+        print(format_defects_markdown(defects))
+    elif output_format == "json":
+        print(format_defects_json(defects))
 
 
 @main.command()

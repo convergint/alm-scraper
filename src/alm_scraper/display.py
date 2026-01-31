@@ -186,3 +186,107 @@ def format_defect_json(defect: Defect) -> str:
     import json
 
     return json.dumps(defect.model_dump(), indent=2)
+
+
+def format_defect_table(
+    defects: list[Defect],
+    console: Console,
+    total_count: int | None = None,
+) -> None:
+    """Display defects in a compact table format.
+
+    Args:
+        defects: List of defects to display.
+        console: Rich console to write to.
+        total_count: Total number of defects (for "showing X of Y" message).
+    """
+    if not defects:
+        console.print("[dim]No defects found[/dim]")
+        return
+
+    table = Table(box=None, padding=(0, 2), collapse_padding=True)
+    table.add_column("ID", style="cyan", no_wrap=True)
+    table.add_column("Status", no_wrap=True)
+    table.add_column("Pri", no_wrap=True)
+    table.add_column("Name", no_wrap=True)
+    table.add_column("Owner", style="dim", no_wrap=True)
+
+    for d in defects:
+        status_style = _get_status_color(d.status)
+        priority_style = _get_priority_color(d.priority)
+
+        # Truncate name to fit
+        name = d.name or ""
+        if len(name) > 45:
+            name = name[:42] + "..."
+
+        # Short priority (P1, P2, P3, P4)
+        pri = d.priority or "-"
+        if pri.startswith("P") and "-" in pri:
+            pri = pri.split("-")[0]
+
+        # Truncate owner (remove domain suffix if present)
+        owner = d.owner or "-"
+        if "_" in owner:
+            owner = owner.split("_")[0]
+        if len(owner) > 15:
+            owner = owner[:12] + "..."
+
+        table.add_row(
+            f"#{d.id}",
+            Text(d.status or "-", style=status_style),
+            Text(pri, style=priority_style),
+            name,
+            owner,
+        )
+
+    console.print(table)
+
+    # Show count summary
+    if total_count is not None and total_count > len(defects):
+        console.print()
+        console.print(f"[dim]Showing {len(defects)} of {total_count} defects[/dim]")
+    else:
+        console.print()
+        console.print(f"[dim]{len(defects)} defects[/dim]")
+
+
+def format_defects_json(defects: list[Defect]) -> str:
+    """Format a list of defects as JSON.
+
+    Args:
+        defects: List of defects to format.
+
+    Returns:
+        JSON string.
+    """
+    import json
+
+    return json.dumps([d.model_dump() for d in defects], indent=2)
+
+
+def format_defects_markdown(defects: list[Defect]) -> str:
+    """Format a list of defects as a markdown table.
+
+    Args:
+        defects: List of defects to format.
+
+    Returns:
+        Markdown string.
+    """
+    lines = [
+        "| ID | Status | Priority | Name | Owner |",
+        "|---:|--------|----------|------|-------|",
+    ]
+
+    for d in defects:
+        name = d.name or ""
+        if len(name) > 50:
+            name = name[:47] + "..."
+        owner = d.owner or "-"
+        if "_" in owner:
+            owner = owner.split("_")[0]
+
+        lines.append(f"| #{d.id} | {d.status or '-'} | {d.priority or '-'} | {name} | {owner} |")
+
+    return "\n".join(lines)
