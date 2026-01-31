@@ -1,0 +1,39 @@
+[project]
+name = "alm-scraper"
+version = "0.1.0"
+description = "CLI for scraping ALM defect data into searchable local files"
+readme = "README.md"
+authors = [
+    { name = "Brian Brennan", email = "brian.brennan@convergint.com" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "click>=8.1",
+    "rich>=13.0",
+    "pydantic>=2.0",
+]
+
+[project.scripts]
+alm = "alm_scraper.cli:main"
+
+[build-system]
+requires = ["uv_build>=0.9.26,<0.10.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "hypothesis>=6.0",
+    "ruff>=0.9",
+    "ty>=0.0.1a6",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "PTH"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
