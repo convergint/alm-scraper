@@ -3,9 +3,11 @@ import sys
 from pathlib import Path
 
 import click
+import httpx
 from rich.console import Console
 
-from alm_scraper.config import Config, get_config_path, save_config
+from alm_scraper.api import ALMClient
+from alm_scraper.config import Config, get_config_path, load_config, save_config
 from alm_scraper.curl_parser import parse_curl
 from alm_scraper.db import get_db_path, get_defect_by_id
 from alm_scraper.defect import parse_alm_response
@@ -60,8 +62,47 @@ def show(defect_id: int, output_format: str) -> None:
 @main.command()
 def sync() -> None:
     """Sync defects from ALM to local storage."""
-    err.print("[yellow]sync - not yet implemented[/yellow]")
-    sys.exit(1)
+    config = load_config()
+
+    if config is None:
+        err.print("[red]Error: No configuration found.[/red]")
+        err.print()
+        err.print("Run 'alm config import-curl' first to set up authentication.")
+        sys.exit(1)
+        return  # help type checker
+
+    err.print(f"Fetching defects from {config.base_url}...")
+
+    client = ALMClient(config)
+
+    def on_page(page: int, total: int, count: int) -> None:
+        err.print(f"  Page {page}/{total}: {count} defects")
+
+    try:
+        data = client.fetch_all_defects(on_page=on_page)
+    except httpx.HTTPStatusError as e:
+        err.print(f"[red]Error: HTTP {e.response.status_code}[/red]")
+        if e.response.status_code in (401, 403):
+            err.print()
+            err.print("Your session may have expired. To refresh:")
+            err.print("1. Log into ALM in your browser")
+            err.print("2. Copy a request as cURL from DevTools")
+            err.print("3. Run: alm config import-curl")
+        sys.exit(1)
+    except httpx.RequestError as e:
+        err.print(f"[red]Error: {e}[/red]")
+        sys.exit(1)
+
+    err.print("Parsing defects...")
+    defects = parse_alm_response(data)
+
+    err.print("Syncing to local storage...")
+    result = sync_defects(defects)
+
+    err.print()
+    err.print(f"[green]Synced {result.defect_count} defects[/green]")
+    err.print(f"  {result.data_dir / result.history_base}.json")
+    err.print(f"  {result.data_dir / result.history_base}.db")
 
 
 @main.command("sync-file")
