@@ -243,7 +243,14 @@ def search_defects(query: str, limit: int = 50) -> list[Defect]:
     try:
         with get_connection() as conn:
             cur = conn.cursor()
-            # Use FTS5 MATCH for full-text search
+            # Add * to each word for prefix matching (e.g., "rob" matches "robert")
+            # Escape quotes and split into words
+            words = query.replace('"', "").split()
+            if not words:
+                return []
+            # Make each word a prefix search
+            fts_query = " ".join(f'"{word}"*' for word in words)
+
             cur.execute(
                 """
                 SELECT d.* FROM defects d
@@ -252,7 +259,7 @@ def search_defects(query: str, limit: int = 50) -> list[Defect]:
                 ORDER BY rank
                 LIMIT ?
                 """,
-                (query, limit),
+                (fts_query, limit),
             )
             return [_row_to_defect(row) for row in cur.fetchall()]
     except FileNotFoundError:
