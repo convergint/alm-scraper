@@ -1,10 +1,14 @@
+import json
 import sys
+from pathlib import Path
 
 import click
 from rich.console import Console
 
 from alm_scraper.config import Config, get_config_path, save_config
 from alm_scraper.curl_parser import parse_curl
+from alm_scraper.defect import parse_alm_response
+from alm_scraper.storage import sync_defects
 
 err = Console(stderr=True)
 
@@ -28,6 +32,32 @@ def sync() -> None:
     """Sync defects from ALM to local storage."""
     err.print("[yellow]sync - not yet implemented[/yellow]")
     sys.exit(1)
+
+
+@main.command("sync-file")
+@click.argument("file", type=click.Path(exists=True, path_type=Path))
+def sync_file(file: Path) -> None:
+    """Import defects from a local ALM JSON export file.
+
+    This is useful for testing the sync pipeline without hitting the network.
+    The file should be a raw ALM API response with an 'entities' array.
+    """
+    err.print(f"Reading {file}...")
+
+    with file.open() as f:
+        data = json.load(f)
+
+    err.print("Parsing defects...")
+    defects = parse_alm_response(data)
+    err.print(f"  Found {len(defects)} defects")
+
+    err.print("Syncing to local storage...")
+    result = sync_defects(defects)
+
+    err.print()
+    err.print(f"[green]Synced {result.defect_count} defects[/green]")
+    err.print(f"  {result.data_dir / result.history_base}.json")
+    err.print(f"  {result.data_dir / result.history_base}.db")
 
 
 @main.group()
