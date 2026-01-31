@@ -107,3 +107,80 @@ def _get_priority_color(priority: str | None) -> str:
     if "low" in priority_lower or "p4" in priority_lower:
         return "dim"
     return "white"
+
+
+def format_defect_markdown(defect: Defect) -> str:
+    """Format a defect as markdown.
+
+    Args:
+        defect: The defect to format.
+
+    Returns:
+        Markdown string.
+    """
+    lines: list[str] = []
+
+    # Header
+    lines.append(f"# Defect #{defect.id}: {defect.name}")
+    lines.append("")
+
+    # Status line
+    status_parts = [f"**Status:** {defect.status or 'Unknown'}"]
+    status_parts.append(f"**Priority:** {defect.priority or 'Unknown'}")
+    if defect.owner:
+        status_parts.append(f"**Owner:** {defect.owner}")
+    lines.append(" | ".join(status_parts))
+    lines.append("")
+
+    # Metadata table
+    lines.append("| Field | Value |")
+    lines.append("|-------|-------|")
+
+    if defect.detected_by:
+        lines.append(f"| Detected by | {defect.detected_by} |")
+    if defect.created:
+        lines.append(f"| Created | {defect.created} |")
+    if defect.modified:
+        lines.append(f"| Modified | {defect.modified} |")
+    if defect.closed:
+        lines.append(f"| Closed | {defect.closed} |")
+    if defect.application:
+        lines.append(f"| Application | {defect.application} |")
+    if defect.workstream:
+        lines.append(f"| Workstream | {defect.workstream} |")
+    if defect.module:
+        lines.append(f"| Module | {defect.module} |")
+    if defect.defect_type:
+        lines.append(f"| Type | {defect.defect_type} |")
+
+    lines.append("")
+
+    # Description
+    if defect.description:
+        lines.append("## Description")
+        lines.append("")
+        lines.append(defect.description)
+        lines.append("")
+
+    # Dev comments
+    if defect.dev_comments:
+        lines.append("## Dev Comments")
+        lines.append("")
+        lines.append(defect.dev_comments)
+        lines.append("")
+
+    return "\n".join(lines)
+
+
+def format_defect_json(defect: Defect) -> str:
+    """Format a defect as JSON.
+
+    Args:
+        defect: The defect to format.
+
+    Returns:
+        JSON string.
+    """
+    import json
+
+    return json.dumps(defect.model_dump(), indent=2)

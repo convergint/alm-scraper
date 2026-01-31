@@ -9,7 +9,7 @@ from alm_scraper.config import Config, get_config_path, save_config
 from alm_scraper.curl_parser import parse_curl
 from alm_scraper.db import get_db_path, get_defect_by_id
 from alm_scraper.defect import parse_alm_response
-from alm_scraper.display import format_defect
+from alm_scraper.display import format_defect, format_defect_json, format_defect_markdown
 from alm_scraper.storage import sync_defects
 
 err = Console(stderr=True)
@@ -23,7 +23,15 @@ def main() -> None:
 
 @main.command()
 @click.argument("defect_id", type=int)
-def show(defect_id: int) -> None:
+@click.option(
+    "-f",
+    "--format",
+    "output_format",
+    type=click.Choice(["rich", "markdown", "md", "json"]),
+    default="rich",
+    help="Output format (default: rich)",
+)
+def show(defect_id: int, output_format: str) -> None:
     """Show details for a specific defect by ID."""
     db_path = get_db_path()
 
@@ -40,8 +48,13 @@ def show(defect_id: int) -> None:
         sys.exit(1)
         return  # help type checker
 
-    out = Console()
-    format_defect(defect, out)
+    if output_format == "rich":
+        out = Console()
+        format_defect(defect, out)
+    elif output_format in ("markdown", "md"):
+        print(format_defect_markdown(defect))
+    elif output_format == "json":
+        print(format_defect_json(defect))
 
 
 @main.command()
