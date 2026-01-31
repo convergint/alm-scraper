@@ -7,7 +7,9 @@ from rich.console import Console
 
 from alm_scraper.config import Config, get_config_path, save_config
 from alm_scraper.curl_parser import parse_curl
+from alm_scraper.db import get_db_path, get_defect_by_id
 from alm_scraper.defect import parse_alm_response
+from alm_scraper.display import format_defect
 from alm_scraper.storage import sync_defects
 
 err = Console(stderr=True)
@@ -23,8 +25,23 @@ def main() -> None:
 @click.argument("defect_id", type=int)
 def show(defect_id: int) -> None:
     """Show details for a specific defect by ID."""
-    err.print(f"[yellow]show defect {defect_id} - not yet implemented[/yellow]")
-    sys.exit(1)
+    db_path = get_db_path()
+
+    if not db_path.exists():
+        err.print("[red]Error: No defects synced yet.[/red]")
+        err.print()
+        err.print("Run 'alm sync' or 'alm sync-file <file>' first.")
+        sys.exit(1)
+
+    defect = get_defect_by_id(defect_id)
+
+    if defect is None:
+        err.print(f"[red]Error: Defect #{defect_id} not found[/red]")
+        sys.exit(1)
+        return  # help type checker
+
+    out = Console()
+    format_defect(defect, out)
 
 
 @main.command()
