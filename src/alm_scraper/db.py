@@ -117,14 +117,47 @@ def get_defect_by_id(defect_id: int) -> Defect | None:
         return None
 
 
+def _build_filter_query(
+    status: tuple[str, ...] | None = None,
+    owner: tuple[str, ...] | None = None,
+    module: tuple[str, ...] | None = None,
+    defect_type: tuple[str, ...] | None = None,
+    priority: tuple[str, ...] | None = None,
+    workstream: tuple[str, ...] | None = None,
+) -> tuple[str, list[str]]:
+    """Build WHERE clause and params for defect filters."""
+    conditions: list[str] = []
+    params: list[str] = []
+
+    # Exact match filters
+    if status:
+        _add_exact_filter(conditions, params, "status", status)
+    if priority:
+        _add_exact_filter(conditions, params, "priority", priority)
+
+    # Partial match filters
+    if owner:
+        _add_partial_filter(conditions, params, "owner", owner)
+    if module:
+        _add_partial_filter(conditions, params, "module", module)
+    if defect_type:
+        _add_partial_filter(conditions, params, "defect_type", defect_type)
+    if workstream:
+        _add_partial_filter(conditions, params, "workstream", workstream)
+
+    where = " AND ".join(conditions) if conditions else "1=1"
+    return where, params
+
+
 def list_defects(
-    status: tuple[str, ...] = (),
-    owner: tuple[str, ...] = (),
-    module: tuple[str, ...] = (),
-    defect_type: tuple[str, ...] = (),
-    priority: tuple[str, ...] = (),
-    workstream: tuple[str, ...] = (),
+    status: tuple[str, ...] | None = None,
+    owner: tuple[str, ...] | None = None,
+    module: tuple[str, ...] | None = None,
+    defect_type: tuple[str, ...] | None = None,
+    priority: tuple[str, ...] | None = None,
+    workstream: tuple[str, ...] | None = None,
     limit: int | None = 50,
+    offset: int = 0,
 ) -> list[Defect]:
     """List defects with optional filters.
 
@@ -138,26 +171,22 @@ def list_defects(
         priority: Filter by priority (case-insensitive exact match).
         workstream: Filter by workstream (case-insensitive partial match).
         limit: Maximum results to return (None for no limit).
+        offset: Number of results to skip.
 
     Returns:
         List of matching defects, sorted by priority then created date.
     """
     try:
         with get_connection() as conn:
-            conditions: list[str] = []
-            params: list[str] = []
+            where, params = _build_filter_query(
+                status=status,
+                owner=owner,
+                module=module,
+                defect_type=defect_type,
+                priority=priority,
+                workstream=workstream,
+            )
 
-            # Exact match filters
-            _add_exact_filter(conditions, params, "status", status)
-            _add_exact_filter(conditions, params, "priority", priority)
-
-            # Partial match filters
-            _add_partial_filter(conditions, params, "owner", owner)
-            _add_partial_filter(conditions, params, "module", module)
-            _add_partial_filter(conditions, params, "defect_type", defect_type)
-            _add_partial_filter(conditions, params, "workstream", workstream)
-
-            where = " AND ".join(conditions) if conditions else "1=1"
             query = f"""
                 SELECT * FROM defects
                 WHERE {where}
@@ -165,8 +194,8 @@ def list_defects(
             """
 
             if limit is not None:
-                query += " LIMIT ?"
-                params.append(str(limit))
+                query += " LIMIT ? OFFSET ?"
+                params.extend([str(limit), str(offset)])
 
             cur = conn.cursor()
             cur.execute(query, params)
@@ -175,15 +204,59 @@ def list_defects(
         return []
 
 
-def count_defects() -> int:
-    """Return total number of defects in the database."""
+def count_defects(
+    status: tuple[str, ...] | None = None,
+    owner: tuple[str, ...] | None = None,
+    module: tuple[str, ...] | None = None,
+    defect_type: tuple[str, ...] | None = None,
+    priority: tuple[str, ...] | None = None,
+    workstream: tuple[str, ...] | None = None,
+) -> int:
+    """Return total number of defects matching filters."""
     try:
         with get_connection(row_factory=False) as conn:
+            where, params = _build_filter_query(
+                status=status,
+                owner=owner,
+                module=module,
+                defect_type=defect_type,
+                priority=priority,
+                workstream=workstream,
+            )
             cur = conn.cursor()
-            cur.execute("SELECT COUNT(*) FROM defects")
+            cur.execute(f"SELECT COUNT(*) FROM defects WHERE {where}", params)
             return cur.fetchone()[0]
     except FileNotFoundError:
         return 0
+
+
+def search_defects(query: str, limit: int = 50) -> list[Defect]:
+    """Full-text search across defects using FTS5.
+
+    Args:
+        query: Search query string.
+        limit: Maximum results to return.
+
+    Returns:
+        List of matching defects, ranked by relevance.
+    """
+    try:
+        with get_connection() as conn:
+            cur = conn.cursor()
+            # Use FTS5 MATCH for full-text search
+            cur.execute(
+                """
+                SELECT d.* FROM defects d
+                JOIN defects_fts fts ON d.id = fts.rowid
+                WHERE defects_fts MATCH ?
+                ORDER BY rank
+                LIMIT ?
+                """,
+                (query, limit),
+            )
+            return [_row_to_defect(row) for row in cur.fetchall()]
+    except FileNotFoundError:
+        return []
 
 
 class OldestDefect:

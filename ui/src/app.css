@@ -1,0 +1,79 @@
+@import "tailwindcss";
+
+/* Styles for rendered HTML content (descriptions, dev comments) */
+.html-content {
+  line-height: 1.6;
+}
+
+.html-content a {
+  color: #93c5fd; /* text-blue-300 */
+  text-decoration: underline;
+}
+
+.html-content a:hover {
+  color: #bfdbfe; /* text-blue-200 */
+}
+
+.html-content p {
+  margin-bottom: 1em;
+}
+
+.html-content ul,
+.html-content ol {
+  margin-left: 1.5em;
+  margin-bottom: 1em;
+}
+
+.html-content li {
+  margin-bottom: 0.25em;
+}
+
+.html-content ul li {
+  list-style-type: disc;
+}
+
+.html-content ol li {
+  list-style-type: decimal;
+}
+
+.html-content hr {
+  border-color: #4b5563; /* gray-600 */
+  margin: 1.5em 0;
+}
+
+.html-content strong,
+.html-content b {
+  font-weight: 600;
+}
+
+/* Dev comments with structured author/date blocks */
+.html-content .comment-block {
+  border-left: 3px solid #4b5563; /* gray-600 */
+  padding-left: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.html-content .comment-block:last-child {
+  margin-bottom: 0;
+}
+
+.html-content .comment-header {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-bottom: 0.5rem;
+  font-size: 0.875rem;
+}
+
+.html-content .comment-author {
+  color: #93c5fd; /* text-blue-300 */
+  font-weight: 500;
+}
+
+.html-content .comment-date {
+  color: #9ca3af; /* text-gray-400 */
+}
+
+.html-content .comment-body {
+  line-height: 1.6;
+}

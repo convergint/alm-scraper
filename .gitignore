@@ -9,6 +9,11 @@ wheels/
 # Virtual environments
 .venv
 
+# Node/UI
+ui/node_modules/
+ui/build/
+ui/.svelte-kit/
+
 # Local scratch
 tmp/
 check_rendering.py

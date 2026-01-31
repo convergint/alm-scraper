@@ -471,5 +471,41 @@ def config_path() -> None:
     print(get_config_path())
 
 
+@main.command()
+@click.option("--port", default=8753, help="Port to run on")
+@click.option("--no-open", is_flag=True, help="Don't open browser automatically")
+def ui(port: int, no_open: bool) -> None:
+    """Launch local web UI for browsing defects."""
+    require_db()
+
+    import threading
+    import time
+    import webbrowser
+
+    import uvicorn
+
+    url = f"http://localhost:{port}"
+
+    # Open browser after a short delay (give server time to start)
+    if not no_open:
+
+        def open_browser() -> None:
+            time.sleep(1)
+            webbrowser.open(url)
+
+        threading.Thread(target=open_browser, daemon=True).start()
+
+    err.print(f"Starting ALM UI at {url}")
+    err.print("Press Ctrl+C to stop")
+    err.print()
+
+    uvicorn.run(
+        "alm_scraper.ui.api:app",
+        host="127.0.0.1",
+        port=port,
+        log_level="warning",
+    )
+
+
 if __name__ == "__main__":
     main()
