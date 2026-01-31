@@ -41,14 +41,37 @@ class Defect(BaseModel):
 
 
 class HTMLTextExtractor(html.parser.HTMLParser):
-    """Extract plain text from HTML."""
+    """Extract plain text from HTML, preserving block structure."""
+
+    # Tags that create line breaks
+    BLOCK_TAGS = {"div", "p", "br", "tr", "li", "h1", "h2", "h3", "h4", "h5", "h6"}
 
     def __init__(self) -> None:
         super().__init__()
         self.text_parts: list[str] = []
+        self._in_style = False
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        if tag == "style":
+            self._in_style = True
+        elif tag == "p":
+            # Paragraphs get a blank line before (breathing room)
+            if self.text_parts and not self.text_parts[-1].endswith("\n\n"):
+                if self.text_parts[-1].endswith("\n"):
+                    self.text_parts.append("\n")
+                else:
+                    self.text_parts.append("\n\n")
+        elif tag in self.BLOCK_TAGS and self.text_parts and not self.text_parts[-1].endswith("\n"):
+            # Add newline before block elements
+            self.text_parts.append("\n")
+
+    def handle_endtag(self, tag: str) -> None:
+        if tag == "style":
+            self._in_style = False
 
     def handle_data(self, data: str) -> None:
-        self.text_parts.append(data)
+        if not self._in_style:
+            self.text_parts.append(data)
 
     def get_text(self) -> str:
         return "".join(self.text_parts)
@@ -68,6 +91,41 @@ def strip_html(html_content: str | None) -> str | None:
         return text if text else None
     except Exception:
         # If parsing fails, return original
+        return html_content
+
+
+def strip_html_preserve_structure(html_content: str | None) -> str | None:
+    """Strip HTML tags but preserve block structure (for comments)."""
+    if not html_content:
+        return None
+
+    parser = HTMLTextExtractor()
+    try:
+        parser.feed(html_content)
+        text = parser.get_text()
+
+        # Normalize runs of whitespace within lines, but preserve line breaks
+        lines = text.split("\n")
+        cleaned_lines: list[str] = []
+        for line in lines:
+            cleaned = re.sub(r"[ \t]+", " ", line).strip()
+            cleaned_lines.append(cleaned)
+
+        # Collapse multiple blank lines into one
+        result_lines: list[str] = []
+        prev_blank = False
+        for line in cleaned_lines:
+            if not line:
+                if not prev_blank:
+                    result_lines.append("")
+                prev_blank = True
+            else:
+                result_lines.append(line)
+                prev_blank = False
+
+        text = "\n".join(result_lines).strip()
+        return text if text else None
+    except Exception:
         return html_content
 
 
@@ -117,7 +175,7 @@ def parse_alm_entity(entity: dict[str, Any]) -> Defect:
         detected_by=fields.get("detected-by"),
         description=strip_html(description_html),
         description_html=description_html,
-        dev_comments=strip_html(dev_comments_html),
+        dev_comments=strip_html_preserve_structure(dev_comments_html),
         dev_comments_html=dev_comments_html,
         created=fields.get("creation-time"),
         modified=fields.get("last-modified"),

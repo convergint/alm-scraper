@@ -5,7 +5,7 @@ from rich.panel import Panel
 from rich.table import Table
 from rich.text import Text
 
-from alm_scraper.defect import Defect
+from alm_scraper.defect import Defect, strip_html_preserve_structure
 
 
 def format_defect(defect: Defect, console: Console) -> None:
@@ -68,11 +68,12 @@ def format_defect(defect: Defect, console: Console) -> None:
         console.print("[bold]Description:[/bold]")
         console.print(defect.description)
 
-    # Dev comments
-    if defect.dev_comments:
+    # Dev comments - parse from HTML for proper formatting
+    dev_comments = strip_html_preserve_structure(defect.dev_comments_html)
+    if dev_comments:
         console.print()
         console.print("[bold]Dev Comments:[/bold]")
-        console.print(defect.dev_comments)
+        console.print(dev_comments)
 
     console.print()
 
@@ -162,11 +163,12 @@ def format_defect_markdown(defect: Defect) -> str:
         lines.append(defect.description)
         lines.append("")
 
-    # Dev comments
-    if defect.dev_comments:
+    # Dev comments - parse from HTML for proper formatting
+    dev_comments = strip_html_preserve_structure(defect.dev_comments_html)
+    if dev_comments:
         lines.append("## Dev Comments")
         lines.append("")
-        lines.append(defect.dev_comments)
+        lines.append(dev_comments)
         lines.append("")
 
     return "\n".join(lines)
