@@ -131,41 +131,96 @@ When your session expires, just run `alm config import-browser` again.
 
 ## Development
 
+### Prerequisites
+
+- Python 3.11+ with [uv](https://github.com/astral-sh/uv)
+- Node.js 18+ (for UI development)
+
+### Commands
+
 ```bash
-# Run checks (lint, typecheck, test)
-make check
+make check      # Run lint, typecheck, and tests
+make format     # Format code with ruff
+make test       # Run pytest
+make lint       # Run ruff check
+make typecheck  # Run ty check
 
-# Format code
-make format
+make build-ui   # Build SvelteKit and copy to static/
+make dev-ui     # Run SvelteKit dev server on :5173
+```
 
-# Run UI dev server (for frontend development)
-make dev-ui       # Runs SvelteKit dev server on :5173
-alm ui --no-open  # Run backend on :8753 (in another terminal)
+### UI Development
 
-# Build UI for distribution
-make build-ui
+For frontend work, run both servers:
+
+```bash
+# Terminal 1: Backend API
+alm ui --no-open  # Runs on :8753
+
+# Terminal 2: Frontend dev server with hot reload
+make dev-ui       # Runs on :5173, proxies API to :8753
+```
+
+After making UI changes, rebuild for distribution:
+
+```bash
+make build-ui     # Builds to src/alm_scraper/ui/static/
 ```
 
 ### Project Structure
 
 ```
 src/alm_scraper/
-├── cli.py          # CLI commands
+├── cli.py          # CLI entry point (typer)
 ├── api.py          # ALM REST client
-├── db.py           # SQLite queries
-├── defect.py       # Defect model
-├── browser.py      # Cookie extraction
+├── db.py           # SQLite database queries
+├── constants.py    # Shared business constants (TERMINAL_STATUSES, etc.)
+├── sql_helpers.py  # SQL query builders
+├── defect.py       # Defect dataclass model
+├── browser.py      # Cookie extraction from browsers
 ├── ui/
-│   ├── api.py      # FastAPI backend
-│   └── static/     # Built SvelteKit app
+│   ├── api.py      # FastAPI backend for web UI
+│   └── static/     # Built SvelteKit app (generated)
 └── ...
 
 ui/                 # SvelteKit frontend source
 ├── src/
-│   ├── routes/     # Pages
-│   └── lib/        # Shared code
+│   ├── routes/
+│   │   ├── +page.svelte           # Defect list with search/filters
+│   │   ├── stats/+page.svelte     # Dashboard with charts
+│   │   └── defects/[id]/          # Defect detail view
+│   └── lib/
+│       ├── api.ts                 # API client functions
+│       ├── types.ts               # TypeScript interfaces
+│       └── components/
+│           ├── KeyboardShortcuts.svelte  # Vim-style shortcuts
+│           ├── BurndownChart.svelte      # Chart.js burndown
+│           └── ...
 └── ...
+
+tests/
+├── test_api.py         # FastAPI endpoint tests
+├── test_sql_helpers.py # SQL builder unit tests
+└── ...
+
+rfcs/                   # Design documents
+└── 009-keyboard-shortcuts.md
 ```
+
+### Key Patterns
+
+**Status Filters**: The UI supports special status values:
+
+- `!terminal` - Excludes closed, rejected, duplicate, deferred
+- `!closed` - Excludes only closed
+
+**Keyboard Shortcuts**: Vim-style navigation in the web UI:
+
+- `j/k` - Navigate list, `Enter` - Open defect
+- `g d` - Go to defect by ID, `g h` - Home, `g s` - Stats
+- `/` - Focus search, `?` - Help overlay
+
+**Svelte 5**: The UI uses Svelte 5 with runes (`$state`, `$effect`, `$derived`, `$props`)
 
 ## Data Storage
 
