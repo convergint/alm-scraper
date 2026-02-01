@@ -10,11 +10,26 @@ from fastapi.staticfiles import StaticFiles
 from lxml import html as lxml_html
 from lxml_html_clean import Cleaner
 
+from alm_scraper.constants import (
+    TERMINAL_STATUSES,
+    AgeBuckets,
+    DefectThresholds,
+    format_convergint_owner,
+)
 from alm_scraper.db import (
     get_connection,
     get_defect_by_id,
+    get_stats,
     list_defects,
     search_defects,
+)
+from alm_scraper.sql_helpers import (
+    age_bucket_case_sql,
+    age_days_sql,
+    convergint_owner_filter,
+    high_priority_filter,
+    priority_sort_case_sql,
+    terminal_status_filter,
 )
 
 # Tags to unwrap (remove tag but keep contents)
@@ -204,7 +219,7 @@ async def get_defects(
     blocking: str | None = None,
     q: str | None = None,
     page: int = Query(default=1, ge=1),
-    limit: int = Query(default=50, ge=1, le=100),
+    limit: int = Query(default=50, ge=1, le=5000),
 ) -> dict:
     """List defects with optional filtering and pagination."""
     offset = (page - 1) * limit
@@ -235,11 +250,35 @@ async def get_defects(
         # Apply status filter (most common filter)
         if status:
             status_lower = status.lower()
-            all_results = [d for d in all_results if d.status and d.status.lower() == status_lower]
+            if status_lower == "!terminal":
+                # Exclude terminal statuses (closed, rejected, duplicate, deferred)
+                all_results = [
+                    d for d in all_results if d.status and d.status.lower() not in TERMINAL_STATUSES
+                ]
+            elif status_lower == "!closed":
+                # Exclude only closed status
+                all_results = [d for d in all_results if d.status and d.status.lower() != "closed"]
+            else:
+                # Exact match
+                all_results = [
+                    d for d in all_results if d.status and d.status.lower() == status_lower
+                ]
         if priority:
             all_results = [d for d in all_results if d.priority == priority]
         if owner:
             all_results = [d for d in all_results if d.owner and owner.lower() in d.owner.lower()]
+        if workstream:
+            all_results = [
+                d
+                for d in all_results
+                if d.workstream and workstream.lower() in d.workstream.lower()
+            ]
+        if defect_type:
+            all_results = [
+                d
+                for d in all_results
+                if d.defect_type and defect_type.lower() in d.defect_type.lower()
+            ]
 
         # Apply scenario filters
         all_results = filter_by_scenario(all_results, scenario, blocking)
@@ -297,6 +336,584 @@ async def get_scenarios() -> dict:
         return {"scenarios": [], "blocks": [], "integrations": []}
 
 
+@app.get("/api/burndown")
+async def get_burndown() -> dict:
+    """Get burndown/burnup chart data with trend prediction."""
+    from datetime import datetime, timedelta
+
+    try:
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+
+            # Get daily opened counts
+            cur.execute("""
+                SELECT date(created) as day, COUNT(*) as count
+                FROM defects
+                WHERE created IS NOT NULL
+                GROUP BY date(created)
+                ORDER BY day
+            """)
+            opened_by_day = {row[0]: row[1] for row in cur.fetchall()}
+
+            # Get daily resolved counts (terminal statuses)
+            # Use closed date for Closed status, modified date for others
+            resolved_filter = terminal_status_filter(exclude=False)
+            cur.execute(
+                f"""
+                SELECT date(COALESCE(closed, modified)) as day, COUNT(*) as count
+                FROM defects
+                WHERE {resolved_filter}
+                  AND COALESCE(closed, modified) IS NOT NULL
+                GROUP BY date(COALESCE(closed, modified))
+                ORDER BY day
+                """
+            )
+            closed_by_day = {row[0]: row[1] for row in cur.fetchall()}
+
+            # Determine date range
+            all_dates = set(opened_by_day.keys()) | set(closed_by_day.keys())
+            if not all_dates:
+                return {
+                    "dates": [],
+                    "cumulative_opened": [],
+                    "cumulative_closed": [],
+                    "open_count": [],
+                    "prediction": None,
+                }
+
+            min_date = min(all_dates)
+            max_date = max(all_dates)
+
+            # Build cumulative arrays
+            dates: list[str] = []
+            cumulative_opened: list[int] = []
+            cumulative_closed: list[int] = []
+            open_count: list[int] = []
+
+            current = datetime.strptime(min_date, "%Y-%m-%d")
+            end = datetime.strptime(max_date, "%Y-%m-%d")
+            total_opened = 0
+            total_closed = 0
+
+            while current <= end:
+                day_str = current.strftime("%Y-%m-%d")
+                total_opened += opened_by_day.get(day_str, 0)
+                total_closed += closed_by_day.get(day_str, 0)
+
+                dates.append(day_str)
+                cumulative_opened.append(total_opened)
+                cumulative_closed.append(total_closed)
+                open_count.append(total_opened - total_closed)
+
+                current += timedelta(days=1)
+
+            # Calculate prediction based on recent trends (last 30 days)
+            prediction = None
+            if len(dates) >= 30:
+                recent_days = 30
+                recent_opened = cumulative_opened[-1] - cumulative_opened[-recent_days]
+                recent_closed = cumulative_closed[-1] - cumulative_closed[-recent_days]
+
+                daily_open_rate = recent_opened / recent_days
+                daily_close_rate = recent_closed / recent_days
+                net_burn_rate = daily_close_rate - daily_open_rate
+
+                current_open = open_count[-1]
+                pred_dates: list[str] = []
+                pred_open: list[float] = []
+
+                # Project forward up to 60 days
+                pred_current = datetime.strptime(max_date, "%Y-%m-%d")
+                projected_open = float(current_open)
+
+                for _ in range(60):
+                    pred_current += timedelta(days=1)
+                    projected_open -= net_burn_rate
+                    if projected_open < 0:
+                        projected_open = 0
+
+                    pred_dates.append(pred_current.strftime("%Y-%m-%d"))
+                    pred_open.append(round(projected_open, 1))
+
+                    # Stop if we've reached zero (burning down) or a cap (burning up)
+                    if net_burn_rate > 0 and projected_open <= 0:
+                        break
+                    if net_burn_rate < 0 and projected_open > current_open * 2:
+                        break
+
+                prediction = {
+                    "dates": pred_dates,
+                    "open_count": pred_open,
+                    "daily_open_rate": round(daily_open_rate, 2),
+                    "daily_close_rate": round(daily_close_rate, 2),
+                    "net_burn_rate": round(net_burn_rate, 2),
+                }
+
+            return {
+                "dates": dates,
+                "cumulative_opened": cumulative_opened,
+                "cumulative_closed": cumulative_closed,
+                "open_count": open_count,
+                "prediction": prediction,
+            }
+    except FileNotFoundError:
+        return {
+            "dates": [],
+            "cumulative_opened": [],
+            "cumulative_closed": [],
+            "open_count": [],
+            "prediction": None,
+        }
+
+
+@app.get("/api/aging")
+async def get_aging() -> dict:
+    """Get aging analysis of active defects."""
+    try:
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+
+            active_filter = terminal_status_filter(exclude=True)
+            age_bucket = age_bucket_case_sql("created")
+
+            # Get age buckets for active defects
+            cur.execute(f"""
+                SELECT
+                    {age_bucket} as bucket,
+                    COUNT(*) as count
+                FROM defects
+                WHERE {active_filter} AND created IS NOT NULL
+                GROUP BY bucket
+            """)
+
+            buckets = {"0-7 days": 0, "8-30 days": 0, "31-90 days": 0, "90+ days": 0}
+            for row in cur.fetchall():
+                buckets[row[0]] = row[1]
+
+            # Get aging by priority with bucket breakdown
+            age_expr = "julianday('now') - julianday(created)"
+            cur.execute(f"""
+                SELECT
+                    priority,
+                    SUM(CASE WHEN {age_expr} <= {AgeBuckets.VERY_NEW} THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN {age_expr} > {AgeBuckets.VERY_NEW}
+                            AND {age_expr} <= {AgeBuckets.NEW} THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN {age_expr} > {AgeBuckets.NEW}
+                            AND {age_expr} <= {AgeBuckets.MEDIUM} THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN {age_expr} > {AgeBuckets.MEDIUM} THEN 1 ELSE 0 END)
+                FROM defects
+                WHERE {active_filter} AND created IS NOT NULL
+                GROUP BY priority
+                ORDER BY priority
+            """)
+            by_priority = [
+                {
+                    "priority": row[0] or "(none)",
+                    "0-7 days": row[1],
+                    "8-30 days": row[2],
+                    "31-90 days": row[3],
+                    "90+ days": row[4],
+                }
+                for row in cur.fetchall()
+            ]
+
+            # Get oldest active defects
+            age_days = age_days_sql("created")
+            cur.execute(f"""
+                SELECT id, name, created, priority,
+                       {age_days} as age_days
+                FROM defects
+                WHERE {active_filter} AND created IS NOT NULL
+                ORDER BY created ASC
+                LIMIT 10
+            """)
+            oldest = [
+                {
+                    "id": row[0],
+                    "name": row[1][:80],
+                    "created": row[2],
+                    "priority": row[3],
+                    "age_days": row[4],
+                }
+                for row in cur.fetchall()
+            ]
+
+            return {
+                "buckets": buckets,
+                "by_priority": by_priority,
+                "oldest": oldest,
+            }
+    except FileNotFoundError:
+        return {"buckets": {}, "by_priority": [], "oldest": []}
+
+
+@app.get("/api/velocity")
+async def get_velocity() -> dict:
+    """Get weekly velocity (opened vs resolved)."""
+    try:
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+
+            # Get weekly opened counts (last 12 weeks)
+            cur.execute("""
+                SELECT strftime('%Y-W%W', created) as week, COUNT(*) as count
+                FROM defects
+                WHERE created IS NOT NULL
+                  AND created >= date('now', '-84 days')
+                GROUP BY week
+                ORDER BY week
+            """)
+            opened_by_week = {row[0]: row[1] for row in cur.fetchall()}
+
+            # Get weekly resolved counts (terminal statuses)
+            resolved_filter = terminal_status_filter(exclude=False)
+            cur.execute(f"""
+                SELECT strftime('%Y-W%W', COALESCE(closed, modified)) as week, COUNT(*) as count
+                FROM defects
+                WHERE {resolved_filter}
+                  AND COALESCE(closed, modified) IS NOT NULL
+                  AND COALESCE(closed, modified) >= date('now', '-84 days')
+                GROUP BY week
+                ORDER BY week
+            """)
+            resolved_by_week = {row[0]: row[1] for row in cur.fetchall()}
+
+            # Combine into weekly data
+            all_weeks = sorted(set(opened_by_week.keys()) | set(resolved_by_week.keys()))
+            weeks = []
+            for week in all_weeks:
+                weeks.append(
+                    {
+                        "week": week,
+                        "opened": opened_by_week.get(week, 0),
+                        "resolved": resolved_by_week.get(week, 0),
+                        "net": resolved_by_week.get(week, 0) - opened_by_week.get(week, 0),
+                    }
+                )
+
+            # Calculate averages
+            total_opened = sum(w["opened"] for w in weeks)
+            total_resolved = sum(w["resolved"] for w in weeks)
+            num_weeks = len(weeks) or 1
+
+            return {
+                "weeks": weeks,
+                "avg_opened_per_week": round(total_opened / num_weeks, 1),
+                "avg_resolved_per_week": round(total_resolved / num_weeks, 1),
+                "avg_net_per_week": round((total_resolved - total_opened) / num_weeks, 1),
+            }
+    except FileNotFoundError:
+        return {
+            "weeks": [],
+            "avg_opened_per_week": 0,
+            "avg_resolved_per_week": 0,
+            "avg_net_per_week": 0,
+        }
+
+
+@app.get("/api/priority-trend")
+async def get_priority_trend() -> dict:
+    """Get priority breakdown trend over time (weekly snapshots)."""
+    try:
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+
+            # For each week, count active defects by priority
+            # This is approximate - we look at defects created before week end
+            # and not resolved before week end
+            active_filter = terminal_status_filter(exclude=True)
+            cur.execute(f"""
+                WITH RECURSIVE weeks AS (
+                    SELECT date('now', '-77 days', 'weekday 0') as week_start
+                    UNION ALL
+                    SELECT date(week_start, '+7 days')
+                    FROM weeks
+                    WHERE week_start < date('now', '-7 days')
+                )
+                SELECT
+                    w.week_start,
+                    d.priority,
+                    COUNT(*) as count
+                FROM weeks w
+                CROSS JOIN defects d
+                WHERE d.created <= date(w.week_start, '+6 days')
+                  AND (
+                    {active_filter}
+                    OR COALESCE(d.closed, d.modified) > date(w.week_start, '+6 days')
+                  )
+                GROUP BY w.week_start, d.priority
+                ORDER BY w.week_start, d.priority
+            """)
+
+            # Organize by week
+            weeks_data: dict[str, dict[str, int]] = {}
+            for row in cur.fetchall():
+                week = row[0]
+                priority = row[1] or "(none)"
+                count = row[2]
+                if week not in weeks_data:
+                    weeks_data[week] = {}
+                weeks_data[week][priority] = count
+
+            # Convert to list format
+            weeks = []
+            for week in sorted(weeks_data.keys()):
+                data = weeks_data[week]
+                weeks.append(
+                    {
+                        "week": week,
+                        "P1": data.get("P1-Critical", 0),
+                        "P2": data.get("P2-High", 0),
+                        "P3": data.get("P3-Medium", 0),
+                        "P4": data.get("P4-Low", 0),
+                        "total": sum(data.values()),
+                    }
+                )
+
+            return {"weeks": weeks}
+    except FileNotFoundError:
+        return {"weeks": []}
+
+
+@app.get("/api/executive")
+async def get_executive_summary() -> dict:
+    """Get executive-level summary with ownership and actionable metrics."""
+    try:
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+
+            active_filter = terminal_status_filter(exclude=True)
+            convergint_filter = convergint_owner_filter("owner")
+            high_pri_filter = high_priority_filter("priority")
+            age_days_created = age_days_sql("created")
+            age_days_modified = age_days_sql("modified")
+
+            # Ownership split (Convergint vs Vendor)
+            cur.execute(f"""
+                SELECT
+                    CASE WHEN {convergint_filter}
+                         THEN 'Convergint' ELSE 'Vendor' END as ownership,
+                    COUNT(*) as active_count,
+                    SUM(CASE WHEN priority = 'P1-Critical' THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN priority = 'P2-High' THEN 1 ELSE 0 END)
+                FROM defects
+                WHERE {active_filter}
+                GROUP BY ownership
+            """)
+            ownership = {}
+            for row in cur.fetchall():
+                ownership[row[0]] = {
+                    "active": row[1],
+                    "p1": row[2],
+                    "p2": row[3],
+                }
+
+            # Status pipeline - where are active defects in the workflow
+            cur.execute(f"""
+                SELECT
+                    status,
+                    COUNT(*) as count,
+                    ROUND(AVG({age_days_modified}), 1) as avg_days_stale
+                FROM defects
+                WHERE {active_filter}
+                GROUP BY status
+                ORDER BY count DESC
+            """)
+            pipeline = [
+                {"status": row[0], "count": row[1], "avg_days_stale": row[2]}
+                for row in cur.fetchall()
+            ]
+
+            # Blocked defects detail
+            priority_sort = priority_sort_case_sql("priority")
+            cur.execute(f"""
+                SELECT id, name, owner, priority,
+                       {age_days_created},
+                       {age_days_modified}
+                FROM defects
+                WHERE LOWER(status) = 'blocked'
+                ORDER BY {priority_sort}, 6 DESC
+                LIMIT 10
+            """)
+            blocked = [
+                {
+                    "id": row[0],
+                    "name": row[1][:60],
+                    "owner": row[2],
+                    "priority": row[3],
+                    "age_days": row[4],
+                    "days_stale": row[5],
+                }
+                for row in cur.fetchall()
+            ]
+
+            # Convergint owner scorecard
+            cur.execute(f"""
+                SELECT
+                    owner,
+                    COUNT(*) as active_count,
+                    SUM(CASE WHEN {high_pri_filter} THEN 1 ELSE 0 END) as high_priority,
+                    MAX({age_days_modified}),
+                    ROUND(AVG({age_days_created}), 1)
+                FROM defects
+                WHERE {active_filter}
+                  AND {convergint_filter}
+                GROUP BY owner
+                ORDER BY high_priority DESC, active_count DESC
+            """)
+            convergint_owners = [
+                {
+                    "owner": format_convergint_owner(row[0]),
+                    "owner_raw": row[0],
+                    "active": row[1],
+                    "high_priority": row[2],
+                    "max_days_stale": row[3],
+                    "avg_age": row[4],
+                }
+                for row in cur.fetchall()
+            ]
+
+            # Stale Convergint defects (no update in 7+ days)
+            cur.execute(f"""
+                SELECT id, name, owner, priority, status,
+                       {age_days_created} as age_days,
+                       {age_days_modified} as days_stale
+                FROM defects
+                WHERE {active_filter}
+                  AND {convergint_filter}
+                  AND {age_days_modified} >= {DefectThresholds.STALE_DAYS}
+                ORDER BY days_stale DESC
+                LIMIT 10
+            """)
+            stale_convergint = [
+                {
+                    "id": row[0],
+                    "name": row[1][:60],
+                    "owner": format_convergint_owner(row[2]),
+                    "priority": row[3],
+                    "status": row[4],
+                    "age_days": row[5],
+                    "days_stale": row[6],
+                }
+                for row in cur.fetchall()
+            ]
+
+            # High priority not being worked (P1/P2 in New status for 2+ days)
+            cur.execute(f"""
+                SELECT id, name, owner, priority,
+                       {age_days_created} as age_days
+                FROM defects
+                WHERE {active_filter}
+                  AND {high_pri_filter}
+                  AND LOWER(status) = 'new'
+                  AND {age_days_created} >= {DefectThresholds.NEW_UNWORKED_DAYS}
+                ORDER BY {priority_sort}, age_days DESC
+                LIMIT 10
+            """)
+            high_priority_stale = [
+                {
+                    "id": row[0],
+                    "name": row[1][:60],
+                    "owner": row[2],
+                    "priority": row[3],
+                    "age_days": row[4],
+                }
+                for row in cur.fetchall()
+            ]
+
+            # Get blocked count from pipeline
+            blocked_count = next(
+                (p["count"] for p in pipeline if p["status"].lower() == "blocked"), 0
+            )
+
+            return {
+                "ownership": ownership,
+                "pipeline": pipeline,
+                "blocked": blocked,
+                "blocked_count": blocked_count,
+                "convergint_owners": convergint_owners,
+                "stale_convergint": stale_convergint,
+                "high_priority_stale": high_priority_stale,
+            }
+    except FileNotFoundError:
+        return {
+            "ownership": {},
+            "pipeline": [],
+            "blocked": [],
+            "blocked_count": 0,
+            "convergint_owners": [],
+            "stale_convergint": [],
+            "high_priority_stale": [],
+        }
+
+
+@app.get("/api/stats")
+async def get_stats_endpoint(include_closed: bool = False) -> dict:
+    """Get aggregate statistics about defects."""
+    stats = get_stats(include_closed=include_closed, top_n=10)
+    if stats is None:
+        return {
+            "total": 0,
+            "open_count": 0,
+            "closed_count": 0,
+            "by_priority": [],
+            "by_module": [],
+            "by_owner": [],
+            "by_type": [],
+            "by_workstream": [],
+            "oldest_open": None,
+            "close_time": None,
+            "by_scenario": [],
+        }
+
+    # Get scenario breakdown for active defects
+    by_scenario: list[tuple[str, int]] = []
+    try:
+        active_filter = terminal_status_filter(exclude=True)
+
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+            # Count defects per scenario (for active defects only)
+            status_filter = "" if include_closed else f"WHERE {active_filter}"
+            cur.execute(f"SELECT scenarios FROM defects {status_filter}")
+            scenario_counts: dict[str, int] = {}
+            for row in cur.fetchall():
+                if row[0]:
+                    for s in row[0].split(","):
+                        s = s.strip()
+                        if s:
+                            scenario_counts[s] = scenario_counts.get(s, 0) + 1
+            by_scenario = sorted(scenario_counts.items(), key=lambda x: -x[1])[:10]
+    except FileNotFoundError:
+        pass
+
+    return {
+        "total": stats.total,
+        "open_count": stats.open_count,
+        "closed_count": stats.closed_count,
+        "by_priority": [{"name": name, "count": count} for name, count in stats.by_priority],
+        "by_module": [{"name": name, "count": count} for name, count in stats.by_module],
+        "by_owner": [{"name": name, "count": count} for name, count in stats.by_owner],
+        "by_type": [{"name": name, "count": count} for name, count in stats.by_type],
+        "by_workstream": [{"name": name, "count": count} for name, count in stats.by_workstream],
+        "by_scenario": [{"name": name, "count": count} for name, count in by_scenario],
+        "oldest_open": {
+            "id": stats.oldest_open.id,
+            "name": stats.oldest_open.name,
+            "created": stats.oldest_open.created,
+        }
+        if stats.oldest_open
+        else None,
+        "close_time": {
+            "p50": round(stats.close_time.p50, 1),
+            "p75": round(stats.close_time.p75, 1),
+            "avg": round(stats.close_time.avg, 1),
+        }
+        if stats.close_time
+        else None,
+    }
+
+
 @app.get("/api/defects/{defect_id}")
 async def get_defect(defect_id: int) -> dict:
     """Get a single defect by ID."""
@@ -306,8 +923,10 @@ async def get_defect(defect_id: int) -> dict:
 
     data = defect.model_dump()
     # Clean HTML fields (strip inline styles, unwrap font/span tags)
-    data["description"] = clean_html(data.get("description"))
-    # Format dev comments with structured author/date headers
+    # Use the HTML version if available, fall back to plain text
+    data["description"] = clean_html(data.get("description_html") or data.get("description"))
+    # For dev comments: use plain text version with format_dev_comments
+    # which parses author/date headers and creates nice formatting with borders
     data["dev_comments"] = format_dev_comments(data.get("dev_comments"))
     return data
 

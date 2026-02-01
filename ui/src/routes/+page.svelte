@@ -2,58 +2,92 @@
 	import { fetchDefects, type DefectsParams } from '$lib/api';
 	import type { Defect, DefectsResponse } from '$lib/types';
 	import { goto } from '$app/navigation';
+	import { page } from '$app/stores';
 	import { Button } from '$lib/components/ui/button';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Input } from '$lib/components/ui/input';
 	import * as Table from '$lib/components/ui/table';
 	import * as Select from '$lib/components/ui/select';
+	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 
 	let data: DefectsResponse | null = $state(null);
-	let loading = $state(true);
 	let error = $state<string | null>(null);
+	let selectedIndex = $state(-1);
+	let searchInputEl: HTMLInputElement | null = $state(null);
 
-	// Filter state
-	let status = $state('open');
+	// Read initial filter values from URL
+	const urlParams = $derived(new URLSearchParams($page.url.search));
+
+	// Filter state - initialize from URL params
+	let status = $state('!terminal');
 	let priority = $state('');
 	let owner = $state('');
+	let workstream = $state('');
+	let defectType = $state('');
 	let search = $state('');
-	let currentPage = $state(1);
+	let initialized = $state(false);
+
+	// Initialize from URL on first load
+	$effect(() => {
+		if (!initialized) {
+			status = urlParams.get('status') || '!terminal';
+			priority = urlParams.get('priority') || '';
+			owner = urlParams.get('owner') || '';
+			workstream = urlParams.get('workstream') || '';
+			defectType = urlParams.get('defect_type') || '';
+			search = urlParams.get('q') || '';
+			initialized = true;
+		}
+	});
 
 	async function loadDefects() {
-		loading = true;
 		error = null;
 
 		try {
 			const params: DefectsParams = {
-				page: currentPage,
-				limit: 50
+				limit: 5000
 			};
 
 			if (status) params.status = status;
 			if (priority) params.priority = priority;
 			if (owner) params.owner = owner;
+			if (workstream) params.workstream = workstream;
+			if (defectType) params.defect_type = defectType;
 			if (search) params.q = search;
 
 			data = await fetchDefects(params);
 		} catch (e) {
 			error = e instanceof Error ? e.message : 'Unknown error';
-		} finally {
-			loading = false;
 		}
 	}
 
+	function updateUrl() {
+		const params = new URLSearchParams();
+		if (status && status !== '!terminal') params.set('status', status);
+		if (priority) params.set('priority', priority);
+		if (owner) params.set('owner', owner);
+		if (workstream) params.set('workstream', workstream);
+		if (defectType) params.set('defect_type', defectType);
+		if (search) params.set('q', search);
+
+		const newUrl = params.toString() ? `?${params}` : '/';
+		goto(newUrl, { replaceState: true, keepFocus: true });
+	}
+
+	// Debounce URL updates for search input
+	let urlUpdateTimeout: ReturnType<typeof setTimeout> | null = null;
+	function debouncedUrlUpdate() {
+		if (urlUpdateTimeout) clearTimeout(urlUpdateTimeout);
+		urlUpdateTimeout = setTimeout(updateUrl, 300);
+	}
+
 	function handleFilterChange() {
-		currentPage = 1;
+		updateUrl();
 		loadDefects();
 	}
 
-	function handleSearch(e: Event) {
-		e.preventDefault();
-		handleFilterChange();
-	}
-
-	function goToPage(page: number) {
-		currentPage = page;
+	function handleSearchInput() {
+		debouncedUrlUpdate();
 		loadDefects();
 	}
 
@@ -76,6 +110,39 @@
 		return { color: 'bg-muted', label: '-' };
 	}
 
+	// Keyboard navigation
+	function navigateDown() {
+		if (data && data.defects.length > 0) {
+			selectedIndex = Math.min(selectedIndex + 1, data.defects.length - 1);
+			scrollToSelected();
+		}
+	}
+
+	function navigateUp() {
+		if (data && data.defects.length > 0) {
+			selectedIndex = Math.max(selectedIndex - 1, 0);
+			scrollToSelected();
+		}
+	}
+
+	function selectCurrent() {
+		if (data && selectedIndex >= 0 && selectedIndex < data.defects.length) {
+			goto(`/defects/${data.defects[selectedIndex].id}`);
+		}
+	}
+
+	function scrollToSelected() {
+		const row = document.querySelector(`[data-index="${selectedIndex}"]`);
+		row?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+	}
+
+	// Reset selection when data changes
+	$effect(() => {
+		if (data) {
+			selectedIndex = data.defects.length > 0 ? 0 : -1;
+		}
+	});
+
 	// Load on mount
 	$effect(() => {
 		loadDefects();
@@ -87,27 +154,48 @@
 </svelte:head>
 
 <div class="container mx-auto px-4 py-8">
-	<h1 class="text-3xl font-bold mb-8">ALM Defects</h1>
+	<div class="flex justify-between items-center mb-8">
+		<div>
+			<h1 class="text-3xl font-bold">ALM Defects</h1>
+			<p class="text-xs text-muted-foreground font-mono mt-1 h-4">{$page.url.search || ''}</p>
+		</div>
+		<Button href="/stats" variant="outline">Dashboard</Button>
+	</div>
 
 	<!-- Filters -->
-	<form onsubmit={handleSearch} class="mb-6 flex flex-wrap gap-4 items-end">
+	<div class="mb-6 flex flex-wrap gap-4 items-end">
 		<div class="flex-1 min-w-48">
 			<Input
 				type="text"
 				bind:value={search}
+				bind:ref={searchInputEl as HTMLInputElement}
+				oninput={handleSearchInput}
 				placeholder="Search defects..."
 			/>
 		</div>
 
 		<Select.Root type="single" bind:value={status} onValueChange={handleFilterChange}>
-			<Select.Trigger class="w-40">
-				{status ? (status === 'open' ? 'Open' : status === 'closed' ? 'Closed' : 'Rejected') : 'All Status'}
+			<Select.Trigger class="w-44">
+				{#if status === '!terminal'}
+					Active
+				{:else if status === 'closed'}
+					Closed
+				{:else if status === 'open'}
+					Open Only
+				{:else if status === 'blocked'}
+					Blocked
+				{:else if status === ''}
+					All Status
+				{:else}
+					{status}
+				{/if}
 			</Select.Trigger>
 			<Select.Content>
 				<Select.Item value="">All Status</Select.Item>
-				<Select.Item value="open">Open</Select.Item>
+				<Select.Item value="!terminal">Active</Select.Item>
+				<Select.Item value="open">Open Only</Select.Item>
+				<Select.Item value="blocked">Blocked</Select.Item>
 				<Select.Item value="closed">Closed</Select.Item>
-				<Select.Item value="rejected">Rejected</Select.Item>
 			</Select.Content>
 		</Select.Root>
 
@@ -124,18 +212,46 @@
 			</Select.Content>
 		</Select.Root>
 
-		<Button type="submit">Search</Button>
-	</form>
+		<!-- Active filter badges -->
+		{#if owner}
+			<Badge variant="secondary" class="flex items-center gap-1 px-3 py-1.5">
+				Owner: {owner.includes('convergint') ? 'Convergint' : owner.replace(/_/g, ' ')}
+				<button
+					type="button"
+					onclick={() => { owner = ''; handleFilterChange(); }}
+					class="ml-1 hover:text-destructive"
+				>×</button>
+			</Badge>
+		{/if}
+		{#if workstream}
+			<Badge variant="secondary" class="flex items-center gap-1 px-3 py-1.5">
+				Workstream: {workstream}
+				<button
+					type="button"
+					onclick={() => { workstream = ''; handleFilterChange(); }}
+					class="ml-1 hover:text-destructive"
+				>×</button>
+			</Badge>
+		{/if}
+		{#if defectType}
+			<Badge variant="secondary" class="flex items-center gap-1 px-3 py-1.5">
+				Type: {defectType}
+				<button
+					type="button"
+					onclick={() => { defectType = ''; handleFilterChange(); }}
+					class="ml-1 hover:text-destructive"
+				>×</button>
+			</Badge>
+		{/if}
+	</div>
 
-	<!-- Loading / Error states -->
-	{#if loading}
-		<div class="text-center py-12 text-muted-foreground">Loading...</div>
-	{:else if error}
+	<!-- Error state -->
+	{#if error}
 		<div class="text-center py-12 text-destructive">{error}</div>
 	{:else if data}
 		<!-- Results count -->
 		<div class="mb-4 text-muted-foreground">
-			Showing {data.defects.length} of {data.total} defects (page {data.page} of {data.pages})
+			{data.defects.length} defects
 		</div>
 
 		<!-- Defects table -->
@@ -144,14 +260,19 @@
 				<Table.Row>
 					<Table.Head class="w-16">ID</Table.Head>
 					<Table.Head>Name</Table.Head>
+					<Table.Head class="w-28">Status</Table.Head>
 					<Table.Head class="w-12 text-center">Pri</Table.Head>
 					<Table.Head class="w-24">Owner</Table.Head>
 					<Table.Head class="w-24">Created</Table.Head>
 				</Table.Row>
 			</Table.Header>
 			<Table.Body>
-				{#each data.defects as defect}
-					<Table.Row class="cursor-pointer" onclick={() => goto(`/defects/${defect.id}`)}>
+				{#each data.defects as defect, i}
+					<Table.Row
+						class="cursor-pointer {i === selectedIndex ? 'bg-muted' : ''}"
+						data-index={i}
+						onclick={() => goto(`/defects/${defect.id}`)}
+					>
 						<Table.Cell>
 							<a href="/defects/{defect.id}" class="text-primary hover:underline text-sm" onclick={(e) => e.stopPropagation()}>
 								#{defect.id}
@@ -180,6 +301,9 @@
 								<span class="truncate" title={defect.name}>{defect.clean_name || defect.name}</span>
 							</div>
 						</Table.Cell>
+						<Table.Cell>
+							<span class="text-xs text-muted-foreground">{defect.status || '-'}</span>
+						</Table.Cell>
 						<Table.Cell class="text-center">
 							{@const p = getPriorityIndicator(defect.priority)}
 							<span class="inline-flex items-center justify-center" title={defect.priority || 'No priority'}>
@@ -193,27 +317,12 @@
 			</Table.Body>
 		</Table.Root>
 
-		<!-- Pagination -->
-		{#if data.pages > 1}
-			<div class="mt-6 flex justify-center gap-2 items-center">
-				<Button
-					variant="outline"
-					onclick={() => goToPage(currentPage - 1)}
-					disabled={currentPage === 1}
-				>
-					Previous
-				</Button>
-				<span class="px-4 text-muted-foreground">
-					Page {currentPage} of {data.pages}
-				</span>
-				<Button
-					variant="outline"
-					onclick={() => goToPage(currentPage + 1)}
-					disabled={currentPage === data.pages}
-				>
-					Next
-				</Button>
-			</div>
-		{/if}
 	{/if}
 </div>
+
+<KeyboardShortcuts
+	onNavigateDown={navigateDown}
+	onNavigateUp={navigateUp}
+	onSelect={selectCurrent}
+	searchInput={searchInputEl}
+/>

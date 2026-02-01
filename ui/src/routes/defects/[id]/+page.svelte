@@ -7,6 +7,7 @@
 	import { Badge } from '$lib/components/ui/badge';
 	import * as Card from '$lib/components/ui/card';
 	import { Separator } from '$lib/components/ui/separator';
+	import KeyboardShortcuts from '$lib/components/KeyboardShortcuts.svelte';
 
 	let defect: Defect | null = $state(null);
 	let loading = $state(true);
@@ -109,45 +110,46 @@
 			{/if}
 		</div>
 
-		<!-- Metadata grid -->
+		<!-- Metadata -->
 		<Card.Root class="mb-8">
-			<Card.Content class="pt-6">
-				<div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+			<Card.Content class="py-5 px-6">
+				<!-- Classification row - top -->
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-1 text-sm mb-5 pb-5 border-b border-border">
 					<div>
-						<div class="text-muted-foreground text-sm">Owner</div>
-						<div>{stripDomain(defect.owner)}</div>
+						<span class="text-muted-foreground">Type:</span>
+						<span class="ml-1.5">{defect.defect_type || '-'}</span>
 					</div>
 					<div>
-						<div class="text-muted-foreground text-sm">Detected By</div>
-						<div>{stripDomain(defect.detected_by)}</div>
+						<span class="text-muted-foreground">Module:</span>
+						<span class="ml-1.5">{defect.module || '-'}</span>
 					</div>
 					<div>
-						<div class="text-muted-foreground text-sm">Severity</div>
-						<div>{defect.severity || '-'}</div>
+						<span class="text-muted-foreground">Workstream:</span>
+						<span class="ml-1.5">{defect.workstream || '-'}</span>
 					</div>
 					<div>
-						<div class="text-muted-foreground text-sm">Type</div>
-						<div>{defect.defect_type || '-'}</div>
+						<span class="text-muted-foreground">Severity:</span>
+						<span class="ml-1.5">{defect.severity || '-'}</span>
+					</div>
+				</div>
+
+				<!-- Main info row -->
+				<div class="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-4">
+					<div>
+						<div class="text-xs uppercase tracking-wide text-muted-foreground mb-1">Owner</div>
+						<div class="text-base font-medium">{stripDomain(defect.owner)}</div>
 					</div>
 					<div>
-						<div class="text-muted-foreground text-sm">Module</div>
-						<div>{defect.module || '-'}</div>
+						<div class="text-xs uppercase tracking-wide text-muted-foreground mb-1">Detected By</div>
+						<div class="text-base">{stripDomain(defect.detected_by)}</div>
 					</div>
 					<div>
-						<div class="text-muted-foreground text-sm">Workstream</div>
-						<div>{defect.workstream || '-'}</div>
+						<div class="text-xs uppercase tracking-wide text-muted-foreground mb-1">Created</div>
+						<div class="text-base">{formatDate(defect.created).split(' ')[0]}</div>
 					</div>
 					<div>
-						<div class="text-muted-foreground text-sm">Created</div>
-						<div>{formatDate(defect.created)}</div>
-					</div>
-					<div>
-						<div class="text-muted-foreground text-sm">Modified</div>
-						<div>{formatDate(defect.modified)}</div>
-					</div>
-					<div>
-						<div class="text-muted-foreground text-sm">Closed</div>
-						<div>{formatDate(defect.closed)}</div>
+						<div class="text-xs uppercase tracking-wide text-muted-foreground mb-1">Modified</div>
+						<div class="text-base">{formatDate(defect.modified).split(' ')[0]}</div>
 					</div>
 				</div>
 			</Card.Content>
@@ -184,3 +186,5 @@
 		</div>
 	{/if}
 </div>
+
+<KeyboardShortcuts />

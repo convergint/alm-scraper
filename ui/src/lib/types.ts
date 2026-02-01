@@ -37,11 +37,157 @@ export interface DefectsResponse {
   pages: number;
 }
 
+export interface NameCount {
+  name: string;
+  count: number;
+}
+
+export interface OldestDefect {
+  id: number;
+  name: string;
+  created: string;
+}
+
+export interface CloseTimeStats {
+  p50: number;
+  p75: number;
+  avg: number;
+}
+
 export interface StatsResponse {
-  total_open: number;
-  total_closed: number;
-  oldest_open: Defect | null;
-  by_priority: Record<string, number>;
-  by_owner: Record<string, number>;
-  by_module: Record<string, number>;
+  total: number;
+  open_count: number;
+  closed_count: number;
+  by_priority: NameCount[];
+  by_module: NameCount[];
+  by_owner: NameCount[];
+  by_type: NameCount[];
+  by_workstream: NameCount[];
+  by_scenario: NameCount[];
+  oldest_open: OldestDefect | null;
+  close_time: CloseTimeStats | null;
+}
+
+export interface BurndownPrediction {
+  dates: string[];
+  open_count: number[];
+  daily_open_rate: number;
+  daily_close_rate: number;
+  net_burn_rate: number;
+}
+
+export interface BurndownResponse {
+  dates: string[];
+  cumulative_opened: number[];
+  cumulative_closed: number[];
+  open_count: number[];
+  prediction: BurndownPrediction | null;
+}
+
+export interface AgingByPriority {
+  priority: string;
+  "0-7 days": number;
+  "8-30 days": number;
+  "31-90 days": number;
+  "90+ days": number;
+}
+
+export interface OldestDefect {
+  id: number;
+  name: string;
+  created: string;
+  priority: string | null;
+  age_days: number;
+}
+
+export interface AgingResponse {
+  buckets: Record<string, number>;
+  by_priority: AgingByPriority[];
+  oldest: OldestDefect[];
+}
+
+export interface WeeklyVelocity {
+  week: string;
+  opened: number;
+  resolved: number;
+  net: number;
+}
+
+export interface VelocityResponse {
+  weeks: WeeklyVelocity[];
+  avg_opened_per_week: number;
+  avg_resolved_per_week: number;
+  avg_net_per_week: number;
+}
+
+export interface PriorityWeek {
+  week: string;
+  P1: number;
+  P2: number;
+  P3: number;
+  P4: number;
+  total: number;
+}
+
+export interface PriorityTrendResponse {
+  weeks: PriorityWeek[];
+}
+
+// Executive summary types
+export interface OwnershipStats {
+  active: number;
+  p1: number;
+  p2: number;
+}
+
+export interface PipelineStatus {
+  status: string;
+  count: number;
+  avg_days_stale: number;
+}
+
+export interface BlockedDefect {
+  id: number;
+  name: string;
+  owner: string | null;
+  priority: string | null;
+  age_days: number;
+  days_stale: number;
+}
+
+export interface ConvergintOwner {
+  owner: string;
+  owner_raw: string;
+  active: number;
+  high_priority: number;
+  max_days_stale: number;
+  avg_age: number;
+}
+
+export interface StaleDefect {
+  id: number;
+  name: string;
+  owner: string;
+  priority: string | null;
+  status: string;
+  age_days: number;
+  days_stale: number;
+}
+
+export interface HighPriorityStale {
+  id: number;
+  name: string;
+  owner: string | null;
+  priority: string;
+  age_days: number;
+}
+
+export interface ExecutiveResponse {
+  ownership: Record<string, OwnershipStats>;
+  pipeline: PipelineStatus[];
+  blocked: BlockedDefect[];
+  blocked_count: number;
+  convergint_owners: ConvergintOwner[];
+  stale_convergint: StaleDefect[];
+  high_priority_stale: HighPriorityStale[];
 }

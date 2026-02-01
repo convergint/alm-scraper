@@ -5,7 +5,9 @@ from collections.abc import Generator
 from contextlib import contextmanager
 from pathlib import Path
 
+from alm_scraper.constants import TERMINAL_STATUSES
 from alm_scraper.defect import Defect
+from alm_scraper.sql_helpers import terminal_status_filter
 from alm_scraper.storage import get_data_dir
 
 
@@ -136,13 +138,28 @@ def _build_filter_query(
     priority: tuple[str, ...] | None = None,
     workstream: tuple[str, ...] | None = None,
 ) -> tuple[str, list[str]]:
-    """Build WHERE clause and params for defect filters."""
+    """Build WHERE clause and params for defect filters.
+
+    Special status values:
+        - "!closed": matches all statuses except Closed
+        - "!terminal": matches all statuses except terminal ones
+                       (Closed, Rejected, Duplicate, Deferred)
+    """
     conditions: list[str] = []
     params: list[str] = []
 
     # Exact match filters
     if status:
-        _add_exact_filter(conditions, params, "status", status)
+        # Special case: "!closed" means everything except Closed status
+        if len(status) == 1 and status[0].lower() == "!closed":
+            conditions.append("LOWER(status) != 'closed'")
+        # Special case: "!terminal" means everything except terminal statuses
+        elif len(status) == 1 and status[0].lower() == "!terminal":
+            placeholders = ",".join("?" * len(TERMINAL_STATUSES))
+            conditions.append(f"LOWER(status) NOT IN ({placeholders})")
+            params.extend(TERMINAL_STATUSES)
+        else:
+            _add_exact_filter(conditions, params, "status", status)
     if priority:
         _add_exact_filter(conditions, params, "priority", priority)
 
@@ -347,7 +364,7 @@ def get_stats(include_closed: bool = False, top_n: int = 5) -> Stats | None:
     """Get aggregate statistics about defects.
 
     Args:
-        include_closed: Include closed defects in breakdowns (default: open only).
+        include_closed: Include closed defects in breakdowns (default: active only).
         top_n: Number of items to include in each breakdown.
 
     Returns:
@@ -357,17 +374,19 @@ def get_stats(include_closed: bool = False, top_n: int = 5) -> Stats | None:
         with get_connection(row_factory=False) as conn:
             cur = conn.cursor()
 
-            # Total counts (always show both)
+            # Total counts
             cur.execute("SELECT COUNT(*) FROM defects")
             total = cur.fetchone()[0]
 
-            cur.execute("SELECT COUNT(*) FROM defects WHERE LOWER(status) = 'open'")
+            # Active = not in terminal status (Closed, Rejected, Duplicate, Deferred)
+            terminal_filter = terminal_status_filter(exclude=True)
+            cur.execute(f"SELECT COUNT(*) FROM defects WHERE {terminal_filter}")
             open_count = cur.fetchone()[0]
 
             closed_count = total - open_count
 
-            # Status filter for breakdowns
-            status_filter = "" if include_closed else "WHERE LOWER(status) = 'open'"
+            # Status filter for breakdowns (active defects only by default)
+            status_filter = "" if include_closed else f"WHERE {terminal_filter}"
 
             # Get breakdowns
             by_priority = _get_breakdown(cur, "priority", status_filter)
@@ -377,12 +396,12 @@ def get_stats(include_closed: bool = False, top_n: int = 5) -> Stats | None:
             by_type = _get_breakdown(cur, "defect_type", status_filter, top_n)
             by_workstream = _get_breakdown(cur, "workstream", status_filter, top_n)
 
-            # Oldest open defect
+            # Oldest active defect
             oldest_open = None
-            cur.execute("""
+            cur.execute(f"""
                 SELECT id, name, created
                 FROM defects
-                WHERE LOWER(status) = 'open' AND created IS NOT NULL
+                WHERE {terminal_filter} AND created IS NOT NULL
                 ORDER BY created ASC
                 LIMIT 1
             """)
