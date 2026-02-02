@@ -1,4 +1,4 @@
-# Snowduck Development Guide
+# alm-scraper Development Guide
 
 ## Collaboration
 
