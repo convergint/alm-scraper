@@ -276,6 +276,150 @@ jdoe, 12/26/2025: Second comment"""
         assert "<br>" in result
 
 
+class TestKanbanEndpoint:
+    """Tests for the /api/kanban endpoint."""
+
+    @pytest.fixture
+    def client(self) -> TestClient:
+        return TestClient(app)
+
+    def test_returns_columns_and_defects(self, client: TestClient) -> None:
+        """Kanban endpoint should return columns and defects."""
+        response = client.get("/api/kanban")
+        assert response.status_code == 200
+        data = response.json()
+        assert "columns" in data
+        assert "defects" in data
+        assert "lanes" in data
+        assert isinstance(data["columns"], list)
+        assert isinstance(data["defects"], list)
+
+    def test_columns_in_correct_order(self, client: TestClient) -> None:
+        """Columns should be ordered with Blocked first, then workflow progression."""
+        response = client.get("/api/kanban")
+        assert response.status_code == 200
+        data = response.json()
+
+        columns = data["columns"]
+        # If Blocked column exists, it should be first
+        if "Blocked" in columns:
+            assert columns[0] == "Blocked"
+
+        # Check that known workflow statuses appear in expected order
+        expected_order = [
+            "Blocked",
+            "New",
+            "Open",
+            "Reopen",
+            "In Development",
+            "Fixed",
+            "Ready for Retest",
+            "Testing Complete",
+            "Closed",
+        ]
+        # Get positions of columns that exist in both lists
+        positions = []
+        for status in expected_order:
+            if status in columns:
+                positions.append(columns.index(status))
+        # Positions should be monotonically increasing
+        assert positions == sorted(positions), f"Columns not in expected order: {columns}"
+
+    def test_excludes_hidden_statuses_by_default(self, client: TestClient) -> None:
+        """Hidden statuses (rejected, duplicate, deferred) should be excluded by default."""
+        response = client.get("/api/kanban")
+        assert response.status_code == 200
+        data = response.json()
+
+        hidden_statuses = {"closed", "rejected", "duplicate", "deferred"}
+        columns_lower = {c.lower() for c in data["columns"]}
+        defect_statuses = {d["status"].lower() for d in data["defects"] if d["status"]}
+
+        # Hidden statuses should not appear in columns or defects
+        assert not (hidden_statuses & columns_lower), "Hidden statuses in columns"
+        assert not (hidden_statuses & defect_statuses), "Hidden statuses in defects"
+
+    def test_includes_hidden_statuses_when_requested(self, client: TestClient) -> None:
+        """Hidden statuses should be included when include_hidden=true."""
+        response = client.get("/api/kanban", params={"include_hidden": True})
+        assert response.status_code == 200
+        data = response.json()
+
+        # This test verifies the flag works - actual presence depends on data
+        # At minimum, we should have more or equal defects with include_hidden=true
+        response_without = client.get("/api/kanban")
+        data_without = response_without.json()
+        assert len(data["defects"]) >= len(data_without["defects"])
+
+    def test_defects_have_required_fields(self, client: TestClient) -> None:
+        """Each defect should have the fields needed for kanban cards."""
+        response = client.get("/api/kanban")
+        assert response.status_code == 200
+        data = response.json()
+
+        required_fields = {"id", "name", "status", "priority", "owner"}
+        for defect in data["defects"][:5]:  # Check first 5
+            assert required_fields <= set(defect.keys()), f"Missing fields in {defect}"
+
+    def test_lane_by_priority(self, client: TestClient) -> None:
+        """Swimlane by priority should return sorted priority lanes."""
+        response = client.get("/api/kanban", params={"lane": "priority"})
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["lane_field"] == "priority"
+        assert isinstance(data["lanes"], list)
+
+        # Lanes should be in priority order
+        expected_order = ["P1-Critical", "P2-High", "P3-Medium", "P4-Low"]
+        lanes = data["lanes"]
+        positions = []
+        for priority in expected_order:
+            if priority in lanes:
+                positions.append(lanes.index(priority))
+        assert positions == sorted(positions), f"Priority lanes not in order: {lanes}"
+
+    def test_lane_by_owner(self, client: TestClient) -> None:
+        """Swimlane by owner should return sorted owner lanes."""
+        response = client.get("/api/kanban", params={"lane": "owner"})
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["lane_field"] == "owner"
+        assert isinstance(data["lanes"], list)
+        # Owners should be sorted alphabetically
+        assert data["lanes"] == sorted(data["lanes"])
+
+    def test_lane_by_module(self, client: TestClient) -> None:
+        """Swimlane by module should return sorted module lanes."""
+        response = client.get("/api/kanban", params={"lane": "module"})
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["lane_field"] == "module"
+        assert isinstance(data["lanes"], list)
+        assert data["lanes"] == sorted(data["lanes"])
+
+    def test_lane_by_workstream(self, client: TestClient) -> None:
+        """Swimlane by workstream should return sorted workstream lanes."""
+        response = client.get("/api/kanban", params={"lane": "workstream"})
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["lane_field"] == "workstream"
+        assert isinstance(data["lanes"], list)
+        assert data["lanes"] == sorted(data["lanes"])
+
+    def test_invalid_lane_ignored(self, client: TestClient) -> None:
+        """Invalid lane field should be ignored (returns empty lanes)."""
+        response = client.get("/api/kanban", params={"lane": "invalid_field"})
+        assert response.status_code == 200
+        data = response.json()
+
+        assert data["lanes"] == []
+        assert data["lane_field"] == "invalid_field"
+
+
 class TestCleanHtmlRealWorld:
     """Test clean_html with real-world ALM HTML content."""
 

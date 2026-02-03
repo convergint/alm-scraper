@@ -24,12 +24,19 @@ This installs the `alm` command to `~/.local/bin/alm`.
 ## Quick Start
 
 ```bash
-# First time: import cookies from your browser
-# (must be logged into ALM in Arc, Chrome, Edge, or Firefox)
+# make sure you are logged into ALM
+open "https://alm.deloitte.com/qcbin/webrunner/#/domains/CONVERGINT/projects/Convergint_Transformation/defects"
+
+# import cookies from your browser
 alm config import-browser
 
 # Sync defects from ALM
 alm sync
+
+# if you're getting auth issues with sync using import-browser,
+# try authenticating by importing a curl command from
+# the `defects` endpoint using the Chrome network inspector
+pbpaste | alm config import-curl
 
 # Launch the web UI
 alm ui

@@ -7,6 +7,7 @@ import type {
   VelocityResponse,
   PriorityTrendResponse,
   ExecutiveResponse,
+  KanbanResponse,
 } from "./types";
 
 const BASE_URL = "/api";
@@ -120,6 +121,29 @@ export async function fetchExecutive(): Promise<ExecutiveResponse> {
 
   if (!res.ok) {
     throw new Error(`Failed to fetch executive summary: ${res.status}`);
+  }
+
+  return res.json();
+}
+
+export interface KanbanParams {
+  lane?: string;
+  include_hidden?: boolean;
+}
+
+export async function fetchKanban(
+  params: KanbanParams = {},
+): Promise<KanbanResponse> {
+  const searchParams = new URLSearchParams();
+
+  if (params.lane) searchParams.set("lane", params.lane);
+  if (params.include_hidden) searchParams.set("include_hidden", "true");
+
+  const url = `${BASE_URL}/kanban?${searchParams}`;
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch kanban: ${res.status}`);
   }
 
   return res.json();

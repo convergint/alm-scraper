@@ -136,6 +136,11 @@
 				e.preventDefault();
 				return;
 			}
+			if (e.key === 'b') {
+				goto('/kanban');
+				e.preventDefault();
+				return;
+			}
 			// Invalid chord, ignore
 			return;
 		}
@@ -222,6 +227,8 @@
 					<span>Go home (defect list)</span>
 					<kbd class="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">g s</kbd>
 					<span>Go to stats/dashboard</span>
+					<kbd class="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">g b</kbd>
+					<span>Go to kanban board</span>
 
 					<h3 class="font-medium text-muted-foreground col-span-2 mt-4">Other</h3>
 					<kbd class="font-mono bg-muted px-1.5 py-0.5 rounded text-xs">/</kbd>

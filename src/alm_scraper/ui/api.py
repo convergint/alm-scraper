@@ -11,6 +11,8 @@ from lxml import html as lxml_html
 from lxml_html_clean import Cleaner
 
 from alm_scraper.constants import (
+    KANBAN_HIDDEN_STATUSES,
+    KANBAN_STATUS_ORDER,
     TERMINAL_STATUSES,
     AgeBuckets,
     DefectThresholds,
@@ -844,6 +846,98 @@ async def get_executive_summary() -> dict:
             "convergint_owners": [],
             "stale_convergint": [],
             "high_priority_stale": [],
+        }
+
+
+@app.get("/api/kanban")
+async def get_kanban(
+    lane: str | None = None,
+    include_hidden: bool = False,
+) -> dict:
+    """Get defects for kanban board view.
+
+    Args:
+        lane: Optional swimlane grouping field (priority, owner, module, workstream)
+        include_hidden: If True, include hidden statuses (rejected, duplicate, deferred)
+
+    Returns:
+        columns: List of status columns in display order
+        defects: List of defects (grouped by lane if specified)
+        lanes: List of lane values if lane parameter provided
+    """
+    try:
+        with get_connection(row_factory=False) as conn:
+            cur = conn.cursor()
+
+            # Build status filter - exclude hidden statuses unless requested
+            if include_hidden:
+                status_filter = ""
+            else:
+                hidden_placeholders = ",".join(f"'{s}'" for s in KANBAN_HIDDEN_STATUSES)
+                status_filter = f"WHERE LOWER(status) NOT IN ({hidden_placeholders})"
+
+            # Get all matching defects
+            cur.execute(f"""
+                SELECT id, name, status, priority, owner, module, workstream,
+                       created, modified
+                FROM defects
+                {status_filter}
+            """)
+
+            defects = []
+            for row in cur.fetchall():
+                defects.append(
+                    {
+                        "id": row[0],
+                        "name": row[1],
+                        "status": row[2],
+                        "priority": row[3],
+                        "owner": row[4],
+                        "module": row[5],
+                        "workstream": row[6],
+                        "created": row[7],
+                        "modified": row[8],
+                    }
+                )
+
+            # Determine which columns to show (only statuses that have defects)
+            status_set = {d["status"] for d in defects if d["status"]}
+
+            # Order columns according to KANBAN_STATUS_ORDER
+            # Statuses not in the order list go at the end
+            status_order_lower = [s.lower() for s in KANBAN_STATUS_ORDER]
+            columns = []
+            for status in KANBAN_STATUS_ORDER:
+                if status.lower() in {s.lower() for s in status_set}:
+                    columns.append(status)
+            # Add any statuses not in the predefined order
+            for status in sorted(status_set):
+                if status.lower() not in status_order_lower:
+                    columns.append(status)
+
+            # Get lane values if swimlane grouping requested
+            lanes: list[str] = []
+            if lane and lane in ("priority", "owner", "module", "workstream"):
+                lane_values = {d[lane] for d in defects if d.get(lane)}
+                if lane == "priority":
+                    # Sort priorities in logical order
+                    priority_order = {"P1-Critical": 1, "P2-High": 2, "P3-Medium": 3, "P4-Low": 4}
+                    lanes = sorted(lane_values, key=lambda p: priority_order.get(p, 99))
+                else:
+                    lanes = sorted(lane_values)
+
+            return {
+                "columns": columns,
+                "defects": defects,
+                "lanes": lanes,
+                "lane_field": lane,
+            }
+    except FileNotFoundError:
+        return {
+            "columns": [],
+            "defects": [],
+            "lanes": [],
+            "lane_field": lane,
         }
 
 

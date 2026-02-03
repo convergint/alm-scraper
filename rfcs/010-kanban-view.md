@@ -1,6 +1,6 @@
 # RFC: Kanban View
 
-**Status:** Draft  
+**Status:** Implemented  
 **Author:** Brian  
 **Created:** 2026-02-01
 

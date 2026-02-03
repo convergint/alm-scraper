@@ -154,12 +154,9 @@
 </svelte:head>
 
 <div class="container mx-auto px-4 py-8">
-	<div class="flex justify-between items-center mb-8">
-		<div>
-			<h1 class="text-3xl font-bold">ALM Defects</h1>
-			<p class="text-xs text-muted-foreground font-mono mt-1 h-4">{$page.url.search || ''}</p>
-		</div>
-		<Button href="/stats" variant="outline">Dashboard</Button>
+	<div class="mb-6">
+		<h1 class="text-3xl font-bold">ALM Defects</h1>
+		<p class="text-xs text-muted-foreground font-mono mt-1 h-4">{$page.url.search || ''}</p>
 	</div>
 
 	<!-- Filters -->

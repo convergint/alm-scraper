@@ -3,6 +3,23 @@
 # Terminal statuses - defects that are done and won't have more work
 TERMINAL_STATUSES = ("closed", "rejected", "duplicate", "deferred")
 
+# Kanban column order (Blocked first for visibility, then workflow progression)
+# Statuses not in this list appear at the end
+KANBAN_STATUS_ORDER = (
+    "Blocked",
+    "New",
+    "Open",
+    "Reopen",
+    "In Development",
+    "Fixed",
+    "Ready for Retest",
+    "Testing Complete",
+    "Closed",
+)
+
+# Statuses hidden by default on kanban (terminal statuses)
+KANBAN_HIDDEN_STATUSES = ("closed", "rejected", "duplicate", "deferred")
+
 # Priority ordering for sorting and display
 PRIORITY_ORDER = {
     "P1-Critical": 1,

@@ -191,3 +191,23 @@ export interface ExecutiveResponse {
   stale_convergint: StaleDefect[];
   high_priority_stale: HighPriorityStale[];
 }
+
+// Kanban types
+export interface KanbanDefect {
+  id: number;
+  name: string;
+  status: string | null;
+  priority: string | null;
+  owner: string | null;
+  module: string | null;
+  workstream: string | null;
+  created: string | null;
+  modified: string | null;
+}
+
+export interface KanbanResponse {
+  columns: string[];
+  defects: KanbanDefect[];
+  lanes: string[];
+  lane_field: string | null;
+}

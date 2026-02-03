@@ -1,7 +1,7 @@
 <script lang="ts">
   import { fetchStats, fetchBurndown, fetchAging, fetchVelocity, fetchPriorityTrend, fetchExecutive } from '$lib/api';
   import type { StatsResponse, BurndownResponse, AgingResponse, VelocityResponse, PriorityTrendResponse, ExecutiveResponse } from '$lib/types';
-  import { Button } from '$lib/components/ui/button';
+
   import * as Card from '$lib/components/ui/card';
   import BurndownChart from '$lib/components/BurndownChart.svelte';
   import VelocityChart from '$lib/components/VelocityChart.svelte';
@@ -58,9 +58,8 @@
 </svelte:head>
 
 <div class="container mx-auto px-4 py-8 max-w-6xl">
-  <div class="flex justify-between items-center mb-8">
+  <div class="mb-8">
     <h1 class="text-3xl font-bold">ALM Dashboard</h1>
-    <Button href="/">View Defects</Button>
   </div>
 
   {#if loading}
