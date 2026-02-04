@@ -14,6 +14,7 @@ def _get_browser_configs() -> list[tuple[str, Callable, Path | None]]:
     return [
         ("Arc (Profile 1)", browser_cookie3.arc, arc_base / "Profile 1" / "Cookies"),
         ("Arc (Default)", browser_cookie3.arc, arc_base / "Default" / "Cookies"),
+        ("Brave", browser_cookie3.brave, None),
         ("Chrome", browser_cookie3.chrome, None),
         ("Edge", browser_cookie3.edge, None),
         ("Firefox", browser_cookie3.firefox, None),
@@ -29,7 +30,7 @@ def extract_cookies(
 
     Args:
         domain: Domain to extract cookies for
-        browser: Force specific browser (arc/chrome/edge/firefox)
+        browser: Force specific browser (arc/brave/chrome/edge/firefox)
         on_status: Callback for status updates: (browser_name, status_msg)
 
     Returns:

@@ -132,7 +132,7 @@ ALM uses Microsoft 365 SSO, so we extract session cookies from your browser.
 2. Run `alm config import-browser`
 3. First run will prompt for Keychain access (to decrypt browser cookies)
 
-Supported browsers: Arc, Chrome, Edge, Firefox (Safari requires Full Disk Access).
+Supported browsers: Arc, Brave, Chrome, Edge, Firefox (Safari requires Full Disk Access).
 
 When your session expires, just run `alm config import-browser` again.
 
