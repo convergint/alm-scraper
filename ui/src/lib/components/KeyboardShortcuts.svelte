@@ -17,6 +17,8 @@
 	let chordTimeout: ReturnType<typeof setTimeout> | null = null;
 	let showGoToDefect = $state(false);
 	let goToDefectId = $state('');
+	let goToDefectInput: HTMLInputElement | null = $state(null);
+	let goToDefectContainer: HTMLDivElement | null = $state(null);
 	let showHelp = $state(false);
 	let toastMessage = $state('');
 	let toastTimeout: ReturnType<typeof setTimeout> | null = null;
@@ -62,37 +64,48 @@
 		}
 	}
 
+	function closeGoToDefect() {
+		showGoToDefect = false;
+		goToDefectId = '';
+	}
+
+	function handleGoToDefectKeydown(e: KeyboardEvent) {
+		if (e.key === 'Enter') {
+			if (goToDefectId) validateAndGoToDefect(goToDefectId);
+			closeGoToDefect();
+			e.preventDefault();
+		} else if (e.key === 'Escape') {
+			closeGoToDefect();
+			e.preventDefault();
+		} else if (
+			// Allow: digits, backspace, delete, arrows, tab, home, end
+			!/^\d$/.test(e.key) &&
+			!['Backspace', 'Delete', 'ArrowLeft', 'ArrowRight', 'Tab', 'Home', 'End'].includes(e.key) &&
+			// Allow Ctrl/Cmd shortcuts (paste, select all, etc.)
+			!e.ctrlKey && !e.metaKey
+		) {
+			e.preventDefault();
+		}
+	}
+
+	function handleGoToDefectInput(e: Event) {
+		const input = e.target as HTMLInputElement;
+		// Filter to digits only
+		goToDefectId = input.value.replace(/\D/g, '');
+	}
+
+	function handleGoToDefectClickOutside(e: MouseEvent) {
+		if (goToDefectContainer && !goToDefectContainer.contains(e.target as Node)) {
+			closeGoToDefect();
+		}
+	}
+
 	function handleKeyDown(e: KeyboardEvent) {
 		const target = e.target as HTMLElement;
 		const isInputFocused = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable;
 
-		// Handle go-to-defect input mode
+		// Go-to-defect input handles its own keyboard events
 		if (showGoToDefect) {
-			if (e.key === 'Escape') {
-				showGoToDefect = false;
-				goToDefectId = '';
-				e.preventDefault();
-				return;
-			}
-			if (e.key === 'Enter') {
-				if (goToDefectId) {
-					validateAndGoToDefect(goToDefectId);
-				}
-				showGoToDefect = false;
-				goToDefectId = '';
-				e.preventDefault();
-				return;
-			}
-			if (e.key === 'Backspace') {
-				goToDefectId = goToDefectId.slice(0, -1);
-				e.preventDefault();
-				return;
-			}
-			if (/^\d$/.test(e.key)) {
-				goToDefectId += e.key;
-				e.preventDefault();
-				return;
-			}
 			return;
 		}
 
@@ -181,6 +194,19 @@
 		window.addEventListener('keydown', handleKeyDown);
 		return () => window.removeEventListener('keydown', handleKeyDown);
 	});
+
+	// Auto-focus input and handle click-outside when go-to-defect prompt opens
+	$effect(() => {
+		if (showGoToDefect) {
+			// Focus the input after it's rendered
+			setTimeout(() => goToDefectInput?.focus(), 0);
+			// Add click-outside listener
+			document.addEventListener('mousedown', handleGoToDefectClickOutside);
+			return () => {
+				document.removeEventListener('mousedown', handleGoToDefectClickOutside);
+			};
+		}
+	});
 </script>
 
 <!-- Toast for chord feedback -->
@@ -192,9 +218,22 @@
 
 <!-- Go to defect input -->
 {#if showGoToDefect}
-	<div class="fixed bottom-16 left-4 bg-background border rounded px-3 py-2 shadow-lg z-50 flex items-center gap-2">
-		<span class="text-sm text-muted-foreground">Go to defect:</span>
-		<span class="font-mono text-primary">{goToDefectId || ''}<span class="animate-pulse">_</span></span>
+	<div
+		bind:this={goToDefectContainer}
+		class="fixed bottom-16 left-4 bg-background border rounded px-3 py-2 shadow-lg z-50 flex items-center gap-2"
+	>
+		<label for="goto-defect-input" class="text-sm text-muted-foreground">Go to defect:</label>
+		<input
+			bind:this={goToDefectInput}
+			id="goto-defect-input"
+			type="text"
+			inputmode="numeric"
+			pattern="[0-9]*"
+			value={goToDefectId}
+			onkeydown={handleGoToDefectKeydown}
+			oninput={handleGoToDefectInput}
+			class="w-24 bg-transparent border-b border-primary font-mono text-primary focus:outline-none"
+		/>
 		<span class="text-xs text-muted-foreground ml-2">Enter to go, Esc to cancel</span>
 	</div>
 {/if}
