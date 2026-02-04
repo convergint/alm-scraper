@@ -420,6 +420,59 @@ class TestKanbanEndpoint:
         assert data["lane_field"] == "invalid_field"
 
 
+class TestSearchById:
+    """Tests for search by defect ID functionality."""
+
+    @pytest.fixture
+    def client(self) -> TestClient:
+        return TestClient(app)
+
+    def test_search_by_numeric_id(self, client: TestClient) -> None:
+        """Searching for a numeric ID should return that exact defect."""
+        # First get a real defect ID from a regular search
+        response = client.get("/api/defects", params={"q": "oracle"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] > 0, "Need at least one defect for this test"
+        defect_id = data["defects"][0]["id"]
+
+        # Now search by that ID
+        response = client.get("/api/defects", params={"q": str(defect_id)})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["defects"][0]["id"] == defect_id
+
+    def test_search_by_id_not_found(self, client: TestClient) -> None:
+        """Searching for a non-existent ID should return empty results."""
+        response = client.get("/api/defects", params={"q": "9999999"})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 0
+        assert data["defects"] == []
+
+    def test_search_by_id_with_whitespace(self, client: TestClient) -> None:
+        """Numeric ID with whitespace should still work as ID search."""
+        # Get a real defect ID
+        response = client.get("/api/defects", params={"q": "oracle"})
+        data = response.json()
+        defect_id = data["defects"][0]["id"]
+
+        # Search with whitespace
+        response = client.get("/api/defects", params={"q": f"  {defect_id}  "})
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 1
+        assert data["defects"][0]["id"] == defect_id
+
+    def test_search_mixed_alphanumeric_uses_fts(self, client: TestClient) -> None:
+        """Search with mixed alphanumeric should use FTS, not ID lookup."""
+        # "oracle123" should be treated as a text search, not an ID search
+        response = client.get("/api/defects", params={"q": "oracle123"})
+        assert response.status_code == 200
+        # Just verify it doesn't error - results depend on data
+
+
 class TestCleanHtmlRealWorld:
     """Test clean_html with real-world ALM HTML content."""
 

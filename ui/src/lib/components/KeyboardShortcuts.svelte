@@ -208,7 +208,7 @@
 		role="button"
 		tabindex="-1"
 	>
-		<div class="bg-card border rounded-lg shadow-xl p-6 max-w-md" onclick={(e) => e.stopPropagation()}>
+		<div class="bg-card border rounded-lg shadow-xl p-6 max-w-md" onclick={(e) => e.stopPropagation()} role="presentation">
 			<h2 class="text-lg font-semibold mb-4">Keyboard Shortcuts</h2>
 			<div class="space-y-3 text-sm">
 				<div class="grid grid-cols-[80px_1fr] gap-2">

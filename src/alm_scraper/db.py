@@ -262,12 +262,18 @@ def search_defects(query: str, limit: int = 50) -> list[Defect]:
     """Full-text search across defects using FTS5.
 
     Args:
-        query: Search query string.
+        query: Search query string. If purely numeric, returns exact ID match.
         limit: Maximum results to return.
 
     Returns:
         List of matching defects, ranked by relevance.
     """
+    # Check for exact ID match (pure numeric query)
+    stripped = query.strip()
+    if stripped.isdigit():
+        defect = get_defect_by_id(int(stripped))
+        return [defect] if defect else []
+
     try:
         with get_connection() as conn:
             cur = conn.cursor()
