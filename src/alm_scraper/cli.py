@@ -400,13 +400,13 @@ def import_curl() -> None:
 @config.command("import-browser")
 @click.option(
     "--browser",
-    type=click.Choice(["arc", "chrome", "edge", "firefox"]),
+    type=click.Choice(["arc", "brave", "chrome", "edge", "firefox"]),
     help="Force a specific browser",
 )
 def import_browser(browser: str | None) -> None:
     """Import cookies from your browser's cookie store.
 
-    Searches Arc, Chrome, Edge, and Firefox for ALM cookies.
+    Searches Arc, Brave, Chrome, Edge, and Firefox for ALM cookies.
     Uses the first browser that has valid cookies.
     """
     from alm_scraper.browser import extract_cookies
@@ -426,7 +426,7 @@ def import_browser(browser: str | None) -> None:
         err.print()
         err.print(f"[red]Error: {e}[/red]")
         err.print()
-        err.print("Log into ALM in Arc, Chrome, Edge, or Firefox:")
+        err.print("Log into ALM in Arc, Brave, Chrome, Edge, or Firefox:")
         err.print(f"  {ALM_LOGIN_URL}")
         err.print()
         err.print("Then run 'alm config import-browser' again.")
