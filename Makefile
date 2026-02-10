@@ -1,7 +1,7 @@
 .PHONY: install uninstall test lint typecheck format check build-ui dev-ui
 
 install: build-ui
-	uv tool install --force --from . alm-scraper
+	uv tool install --force --reinstall --from . alm-scraper
 	@echo "Installed alm to ~/.local/bin/alm"
 
 uninstall:
